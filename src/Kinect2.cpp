@@ -35,17 +35,50 @@
 */
 
 #include "Kinect2.h"
+#include "cinder/app/App.h"
 
 #include <comutil.h>
 
 namespace Kinect2
 {
 using namespace ci;
+using namespace ci::app;
 using namespace std;
 
+string getStatusMessage( KinectStatus status )
+{
+	switch ( status ) {
+	case KinectStatus::KinectStatus_Connected:
+		return "Connected";
+	case KinectStatus::KinectStatus_DeviceNotGenuine:
+		return "Device not genuine";
+	case KinectStatus::KinectStatus_DeviceNotSupported:
+		return "Device not supported";
+	case KinectStatus::KinectStatus_Disconnected:
+		return "Disconnected";
+	case KinectStatus::KinectStatus_Error:
+		return "Error";
+	case KinectStatus::KinectStatus_Initializing:
+		return "Initializing";
+	case KinectStatus::KinectStatus_InsufficientBandwidth:
+		return "Insufficient bandwidth";
+	case KinectStatus::KinectStatus_InUseAsExclusive:
+		return "In use as exclusive";
+	case KinectStatus::KinectStatus_InUseAsShared:
+		return "In use as shared";
+	case KinectStatus::KinectStatus_NotPowered:
+		return "Not powered";
+	case KinectStatus::KinectStatus_NotReady:
+		return "Not ready";
+	default:
+		return "Undefined";
+	}
+}
+
 DeviceOptions::DeviceOptions()
-: mEnabledAudio( true ), mEnabledBody( true ), mEnabledBodyIndex( true ), mEnabledColor( true ), 
-mEnabledDepth( true ), mEnabledInfrared( true ), mEnabledInfraredLongExposure( false )
+: mDeviceIndex( 0 ), mDeviceId( "" ), mEnabledAudio( false ), mEnabledBody( false ), 
+mEnabledBodyIndex( false ), mEnabledColor( true ), mEnabledDepth( true ), 
+mEnabledInfrared( false ), mEnabledInfraredLongExposure( false )
 {
 }
 
@@ -103,6 +136,16 @@ DeviceOptions& DeviceOptions::setDeviceIndex( int32_t index )
 	return *this;
 }
 
+const string& DeviceOptions::getDeviceId() const
+{
+	return mDeviceId;
+}
+
+int32_t	 DeviceOptions::getDeviceIndex() const
+{
+	return mDeviceIndex;
+}
+
 bool DeviceOptions::isAudioEnabled() const
 {
 	return mEnabledAudio;
@@ -141,15 +184,16 @@ bool DeviceOptions::isInfraredLongExposureEnabled() const
 //////////////////////////////////////////////////////////////////////////////////////////////
 
 Frame::Frame()
-: mDeviceId( "" ), mFrameId( 0 )
+: mDeviceId( "" ), mTimeStamp( 0L )
 {
 }
 
-Frame::Frame( int64_t frameId, const string& deviceId, const Surface8u& color,
+Frame::Frame( long long time, const string& deviceId, const Surface8u& color,
 			  const Channel16u& depth, const Channel16u& infrared, 
 			  const Channel16u& infraredLongExposure )
 : mSurfaceColor( color ), mChannelDepth( depth ), mChannelInfrared( infrared ), 
-mChannelInfraredLongExposure( infraredLongExposure ), mDeviceId( deviceId ), mFrameId( frameId )
+mChannelInfraredLongExposure( infraredLongExposure ), mDeviceId( deviceId ), 
+mTimeStamp( time )
 {
 }
 
@@ -168,11 +212,6 @@ const string& Frame::getDeviceId() const
 	return mDeviceId;
 }
 
-int64_t Frame::getFrameId() const
-{
-	return mFrameId;
-}
-
 const Channel16u& Frame::getInfrared() const
 {
 	return mChannelInfrared;
@@ -183,6 +222,11 @@ const Channel16u& Frame::getInfraredLongExposure() const
 	return mChannelInfraredLongExposure;
 }
 
+int64_t Frame::getTimeStamp() const
+{
+	return mTimeStamp;
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////////
 
 DeviceRef Device::create()
@@ -191,8 +235,9 @@ DeviceRef Device::create()
 }
 
 Device::Device()
-: mFrameReader( 0 ), mSensor( 0 )
+: mFrameReader( 0 ), mSensor( 0 ), mStatus( KinectStatus::KinectStatus_Undefined )
 {
+	App::get()->getSignalUpdate().connect( bind( &Device::update, this ) );
 }
 
 Device::~Device()
@@ -222,23 +267,24 @@ void Device::start( const DeviceOptions& deviceOptions )
 	hr			= S_OK;
 	int32_t i	= 0;
 	while ( SUCCEEDED( hr ) && i < 8 ) { // TODO find actual max device count
-		sensorEnum->GetNext( &mSensor );
-
-		string id = "";
-		wchar_t wid[ 512 ];
-		if ( mSensor->get_UniqueKinectId( 512, wid ) ) {
-			id = wcharToString( wid );
-		}
-
-		if ( mDeviceOptions.getDeviceId().empty() ) {
-			if ( mDeviceOptions.getDeviceIndex() == i ) {
-				mDeviceOptions.setDeviceId( id );
-				break;
+		hr = sensorEnum->GetNext( &mSensor );
+		if ( mSensor != 0 ) {
+			string id = "";
+			wchar_t wid[ 48 ];
+			if ( SUCCEEDED( mSensor->get_UniqueKinectId( 48, wid ) ) ) {
+				id = wcharToString( wid );
 			}
-		} else {
-			if ( mDeviceOptions.getDeviceId() == id ) {
-				mDeviceOptions.setDeviceIndex( i );
-				break;
+
+			if ( mDeviceOptions.getDeviceId().empty() ) {
+				if ( mDeviceOptions.getDeviceIndex() == i ) {
+					mDeviceOptions.setDeviceId( id );
+					break;
+				}
+			} else {
+				if ( mDeviceOptions.getDeviceId() == id ) {
+					mDeviceOptions.setDeviceIndex( i );
+					break;
+				}
 			}
 		}
 		++i;
@@ -306,8 +352,17 @@ const Frame& Device::getFrame() const
 	return mFrame;
 }
 
+KinectStatus Device::getStatus() const
+{
+	return mStatus;
+}
+
 void Device::update()
 {
+	if ( mSensor != 0 ) {
+		mSensor->get_Status( &mStatus );
+	}
+
 	if ( mFrameReader == 0 ) {
 		return;
 	}
@@ -515,6 +570,7 @@ void Device::update()
 
 		if ( SUCCEEDED( hr ) ) {
 			// TODO build Kinect2::Frame from buffers, data
+			mFrame.mTimeStamp = time;
 		}
 
 		if ( bodyFrameDescription != 0 ) {

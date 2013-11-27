@@ -38,6 +38,8 @@
 #include "cinder/gl/Texture.h"
 #include "cinder/params/Params.h"
 
+#include "Kinect2.h"
+
 class BasicApp : public ci::app::AppBasic 
 {
 public:
@@ -46,6 +48,8 @@ public:
 	void						update();
 private:
 	ci::gl::TextureRef			mTexture;
+
+	Kinect2::DeviceRef			mDevice;
 
 	float						mFrameRate;
 	bool						mFullScreen;
@@ -75,6 +79,9 @@ void BasicApp::setup()
 	
 	mFrameRate	= 0.0f;
 	mFullScreen	= false;
+
+	mDevice = Kinect2::Device::create();
+	mDevice->start();
 			
 	mParams = params::InterfaceGl::create( "Params", Vec2i( 200, 150 ) );
 	mParams->addParam( "Frame rate",	&mFrameRate,				"", true );
@@ -89,6 +96,10 @@ void BasicApp::update()
 	if ( mFullScreen != isFullScreen() ) {
 		setFullScreen( mFullScreen );
 		mFullScreen = isFullScreen();
+	}
+
+	if ( mDevice ) {
+		console() << mDevice->getFrame().getTimeStamp() << ": " << Kinect2::getStatusMessage( mDevice->getStatus() ) << endl;
 	}
 }
 

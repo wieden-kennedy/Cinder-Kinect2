@@ -40,14 +40,22 @@
 #include "cinder/Matrix.h"
 #include "cinder/Surface.h"
 #include <functional>
+#include "ole2.h"
+
+#if defined( _DEBUG )
+#pragma comment( lib, "comsuppwd.lib" )
+#else
+#pragma comment( lib, "comsuppw.lib" )
+#endif
+#pragma comment( lib, "wbemuuid.lib" )
 
 #include "Kinect.h"
 
 namespace Kinect2 {
 
-//////////////////////////////////////////////////////////////////////////////////////////////
+std::string getStatusMessage( KinectStatus status );
 
-class Device;
+//////////////////////////////////////////////////////////////////////////////////////////////
 
 class DeviceOptions
 {
@@ -88,6 +96,8 @@ protected:
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
+class Device;
+
 class Frame
 {
 public:
@@ -96,20 +106,22 @@ public:
 	const ci::Surface8u&				getColor() const;
 	const ci::Channel16u&				getDepth() const;
 	const std::string&					getDeviceId() const;
-	int64_t								getFrameId() const;
 	const ci::Channel16u&				getInfrared() const;
 	const ci::Channel16u&				getInfraredLongExposure() const;
+	long long							getTimeStamp() const;
 protected:
-	Frame( int64_t frameId, const std::string& deviceId, const ci::Surface8u& color, 
+	Frame( long long frameId, const std::string& deviceId, const ci::Surface8u& color, 
 		const ci::Channel16u& depth, const ci::Channel16u& infrared, 
 		const ci::Channel16u& infraredLongExposure );
 
 	std::string							mDeviceId;
-	int64_t								mFrameId;
 	ci::Channel16u						mChannelDepth;
 	ci::Channel16u						mChannelInfrared;
 	ci::Channel16u						mChannelInfraredLongExposure;
 	ci::Surface8u						mSurfaceColor;
+	long long							mTimeStamp;
+
+	friend class						Device;
 };
 
 //////////////////////////////////////////////////////////////////////////////////////////////
@@ -127,6 +139,7 @@ public:
 
 	const DeviceOptions&				getDeviceOptions() const;
 	const Frame&						getFrame() const;
+	KinectStatus						getStatus() const;
 protected:
 	Device();
 
@@ -141,6 +154,8 @@ protected:
 
 	DeviceOptions						mDeviceOptions;
 	Frame								mFrame;
+	KinectStatus						mStatus;
+	std::string							mStatusMessage();
 
 	std::string							wcharToString( wchar_t* v );
 };

@@ -235,7 +235,7 @@ DeviceRef Device::create()
 }
 
 Device::Device()
-: mFrameReader( 0 ), mSensor( 0 ), mStatus( KinectStatus::KinectStatus_Undefined )
+: mFrameReader( 0 ), mSensor( 0 ), mCoordinateMapper( 0 ), mStatus( KinectStatus::KinectStatus_Undefined )
 {
 	App::get()->getSignalUpdate().connect( bind( &Device::update, this ) );
 }
@@ -248,6 +248,7 @@ Device::~Device()
 void Device::start( const DeviceOptions& deviceOptions )
 {
 	long hr = S_OK;
+	mDeviceOptions = deviceOptions;
 	
 	IKinectSensorCollection* sensorCollection = 0;
 	hr = GetKinectSensorCollection( &sensorCollection );
@@ -291,7 +292,7 @@ void Device::start( const DeviceOptions& deviceOptions )
 	}
 
 	if ( mSensor != 0 ) {
-		hr = mSensor->get_CoordinateMapper( &mCoordinateMapper );
+		//hr = mSensor->get_CoordinateMapper( &mCoordinateMapper );
 		hr = mSensor->Open();
 		if ( SUCCEEDED( hr ) ) {
 			long flags = 0L;
@@ -313,9 +314,14 @@ void Device::start( const DeviceOptions& deviceOptions )
 			if ( mDeviceOptions.isInfraredEnabled() ) {
 				flags |= FrameSourceTypes::FrameSourceTypes_Infrared;
 			}
-			if ( mDeviceOptions.isInfraredEnabled() ) {
+			if ( mDeviceOptions.isInfraredLongExposureEnabled() ) {
 				flags |= FrameSourceTypes::FrameSourceTypes_LongExposureInfrared;
 			}
+
+			if ( flags & FrameSourceTypes_Color ) {
+				console() << "Color enabled" << endl;
+			}
+
 			hr = mSensor->OpenMultiSourceFrameReader( flags, &mFrameReader );
 			if ( FAILED( hr ) ) {
 				if ( mFrameReader != 0 ) {
@@ -329,6 +335,10 @@ void Device::start( const DeviceOptions& deviceOptions )
 
 void Device::stop()
 {
+	if ( mCoordinateMapper != 0 ) {
+		mCoordinateMapper->Release();
+		mCoordinateMapper = 0;
+	}
 	if ( mFrameReader != 0 ) {
 		mFrameReader->Release();
 		mFrameReader = 0;
@@ -376,11 +386,14 @@ void Device::update()
 	IInfraredFrame* infraredFrame							= 0;
 	ILongExposureInfraredFrame* infraredLongExposureFrame	= 0;
 	
-	long hr = mFrameReader->AcquireLatestFrame( &frame );
+	HRESULT hr = mFrameReader->AcquireLatestFrame( &frame );
 
 	// TODO audio
-
 	if ( SUCCEEDED( hr ) ) {
+		console() << "SUCCEEDED " << getElapsedFrames() << endl;
+	}
+
+	if ( SUCCEEDED( hr ) && mDeviceOptions.isBodyEnabled() ) {
 		IBodyFrameReference* frameRef = 0;
 		hr = frame->get_BodyFrameReference( &frameRef );
 		if ( SUCCEEDED( hr ) ) {
@@ -392,7 +405,7 @@ void Device::update()
 		}
 	}
 
-	if ( SUCCEEDED( hr ) ) {
+	if ( SUCCEEDED( hr ) && mDeviceOptions.isBodyIndexEnabled() ) {
 		IBodyIndexFrameReference* frameRef = 0;
 		hr = frame->get_BodyIndexFrameReference( &frameRef );
 		if ( SUCCEEDED( hr ) ) {
@@ -404,7 +417,7 @@ void Device::update()
 		}
 	}
 
-	if ( SUCCEEDED( hr ) ) {
+	if ( SUCCEEDED( hr ) && mDeviceOptions.isColorEnabled() ) {
 		IColorFrameReference* frameRef = 0;
 		hr = frame->get_ColorFrameReference( &frameRef );
 		if ( SUCCEEDED( hr ) ) {
@@ -416,7 +429,7 @@ void Device::update()
 		}
 	}
 
-	if ( SUCCEEDED( hr ) ) {
+	if ( SUCCEEDED( hr ) && mDeviceOptions.isDepthEnabled() ) {
 		IDepthFrameReference* frameRef = 0;
 		hr = frame->get_DepthFrameReference( &frameRef );
 		if ( SUCCEEDED( hr ) ) {
@@ -428,7 +441,7 @@ void Device::update()
 		}
 	}
 
-	if ( SUCCEEDED( hr ) ) {
+	if ( SUCCEEDED( hr ) && mDeviceOptions.isInfraredEnabled() ) {
 		IInfraredFrameReference* frameRef = 0;
 		hr = frame->get_InfraredFrameReference( &frameRef );
 		if ( SUCCEEDED( hr ) ) {
@@ -440,7 +453,7 @@ void Device::update()
 		}
 	}
 
-	if ( SUCCEEDED( hr ) ) {
+	if ( SUCCEEDED( hr ) && mDeviceOptions.isInfraredLongExposureEnabled() ) {
 		ILongExposureInfraredFrameReference* frameRef = 0;
 		hr = frame->get_LongExposureInfraredFrameReference( &frameRef );
 		if ( SUCCEEDED( hr ) ) {
@@ -474,34 +487,43 @@ void Device::update()
 		int32_t colorHeight										= 0;
 		ColorImageFormat imageFormat							= ColorImageFormat_None;
 		uint32_t colorBufferSize								= 0;
-		tagRGBQUAD *colorBuffer									= 0;
+		uint8_t* colorBuffer									= 0;
 
 		IFrameDescription* depthFrameDescription				= 0;
 		int32_t depthWidth										= 0;
 		int32_t depthHeight										= 0;
+		uint16_t depthMinReliableDistance						= 0;
+		uint16_t depthMaxReliableDistance						= 0;
 		uint32_t depthBufferSize								= 0;
-		uint16_t *depthBuffer									= 0;
+		uint16_t* depthBuffer									= 0;
 
 		IFrameDescription* infraredFrameDescription				= 0;
 		int32_t infraredWidth									= 0;
 		int32_t infraredHeight									= 0;
 		uint32_t infraredBufferSize								= 0;
-		uint16_t *infraredBuffer								= 0;
+		uint16_t* infraredBuffer								= 0;
 
 		IFrameDescription* infraredLongExposureFrameDescription	= 0;
 		int32_t infraredLongExposureWidth						= 0;
 		int32_t infraredLongExposureHeight						= 0;
 		uint32_t infraredLongExposureBufferSize					= 0;
-		uint16_t *infraredLongExposureBuffer					= 0;
+		uint16_t* infraredLongExposureBuffer					= 0;
 
 		hr = depthFrame->get_RelativeTime( &time );
 
 		// TODO audio
+		if ( mDeviceOptions.isAudioEnabled() ) {
+
+		}
+
 		// TODO body
+		if ( mDeviceOptions.isBodyEnabled() ) {
+
+		}
 
 		if ( mDeviceOptions.isBodyIndexEnabled() ) {
 			if ( SUCCEEDED( hr ) ) {
-				hr = bodyIndexFrame->get_FrameDescription( &bodyFrameDescription );
+				hr = bodyIndexFrame->get_FrameDescription( &bodyIndexFrameDescription );
 			}
 			if ( SUCCEEDED( hr ) ) {
 				hr = bodyIndexFrameDescription->get_Width( &bodyIndexWidth );
@@ -510,7 +532,7 @@ void Device::update()
 				hr = bodyIndexFrameDescription->get_Height( &bodyIndexHeight );
 			}
 			if ( SUCCEEDED( hr ) ) {
- 				hr = bodyIndexFrame->AccessUnderlyingBuffer( &bodyBufferSize, &bodyIndexBuffer );
+ 				//hr = bodyIndexFrame->AccessUnderlyingBuffer( &bodyIndexBufferSize, &bodyIndexBuffer );
 			}
 		}
 
@@ -528,10 +550,35 @@ void Device::update()
 				hr = colorFrame->get_RawColorImageFormat( &imageFormat );
 			}
 			if ( SUCCEEDED( hr ) ) {
+				bool isAllocated	= false;
+				SurfaceChannelOrder channelOrder = SurfaceChannelOrder::BGRA;
 				if ( imageFormat == ColorImageFormat_Bgra ) {
 					hr = colorFrame->AccessRawUnderlyingBuffer( &colorBufferSize, reinterpret_cast<uint8_t**>( &colorBuffer ) );
+					channelOrder = SurfaceChannelOrder::BGRA;
+				} else if ( imageFormat == ColorImageFormat_Rgba ) {
+					hr = colorFrame->AccessRawUnderlyingBuffer( &colorBufferSize, reinterpret_cast<uint8_t**>( &colorBuffer ) );
+					channelOrder = SurfaceChannelOrder::RGBA;
 				} else {
-					hr = E_FAIL;
+					isAllocated = true;
+					colorBufferSize = colorWidth * colorHeight * sizeof( uint8_t ) * 4;
+					colorBuffer = new uint8_t[ colorBufferSize ];
+					hr = colorFrame->CopyConvertedFrameDataToArray( colorBufferSize, reinterpret_cast<uint8_t*>( colorBuffer ), ColorImageFormat_Rgba );
+					channelOrder = SurfaceChannelOrder::RGBA;
+				}
+
+				if ( SUCCEEDED( hr ) ) {
+					colorFrame->get_RelativeTime( &time );
+					Surface8u colorSurface = Surface8u( colorBuffer, colorWidth, colorHeight, colorWidth * sizeof( uint8_t ) * 4, channelOrder );
+					mFrame.mSurfaceColor = Surface8u( colorWidth, colorHeight, false, channelOrder );
+					mFrame.mSurfaceColor.copyFrom( colorSurface, colorSurface.getBounds() );
+
+					console() << "Color\n\twidth: " << colorWidth << "\n\theight: " << colorHeight 
+						<< "\n\tbuffer size: " << colorBufferSize << "\n\ttime: " << time << endl;
+				}
+
+				if ( isAllocated && colorBuffer != 0 ) {
+					delete[] colorBuffer;
+					colorBuffer = 0;
 				}
 			}
 		}
@@ -547,7 +594,20 @@ void Device::update()
 				hr = depthFrameDescription->get_Height( &depthHeight );
 			}
 			if ( SUCCEEDED( hr ) ) {
+				hr = depthFrame->get_DepthMinReliableDistance( &depthMinReliableDistance );
+			}
+			if ( SUCCEEDED( hr ) ) {
+				hr = depthFrame->get_DepthMaxReliableDistance( &depthMaxReliableDistance );
+			}
+			if ( SUCCEEDED( hr ) ) {
 				hr = depthFrame->AccessUnderlyingBuffer( &depthBufferSize, &depthBuffer );
+			}
+			if ( SUCCEEDED( hr ) ) {
+				Channel16u depthChannel = Channel16u( depthWidth, depthHeight, depthWidth * sizeof( uint16_t ), 1, depthBuffer );
+				mFrame.mChannelDepth = Channel16u( depthWidth, depthHeight );
+				mFrame.mChannelDepth.copyFrom( depthChannel, depthChannel.getBounds() );
+
+				console( ) << "Depth\n\twidth: " << depthWidth << "\n\theight: " << depthHeight << endl;
 			}
 		}
 
@@ -556,17 +616,51 @@ void Device::update()
 				hr = infraredFrame->get_FrameDescription( &infraredFrameDescription );
 			}
 			if ( SUCCEEDED( hr ) ) {
-				hr = infraredFrameDescription->get_Width( &depthWidth );
+				hr = infraredFrameDescription->get_Width( &infraredWidth );
 			}
 			if ( SUCCEEDED( hr ) ) {
-				hr = infraredFrameDescription->get_Height( &depthHeight );
+				hr = infraredFrameDescription->get_Height( &infraredHeight );
 			}
 			if ( SUCCEEDED( hr ) ) {
 				hr = infraredFrame->AccessUnderlyingBuffer( &infraredBufferSize, &infraredBuffer );
 			}
+			if ( SUCCEEDED( hr ) ) {
+				Channel16u infraredChannel = Channel16u( infraredWidth, infraredHeight, infraredWidth * sizeof( uint16_t ), 1, infraredBuffer );
+				mFrame.mChannelInfrared = Channel16u( infraredWidth, infraredHeight );
+				mFrame.mChannelInfrared.copyFrom( infraredChannel, infraredChannel.getBounds() );
+
+				console( ) << "Infrared\n\twidth: " << infraredWidth << "\n\theight: " << infraredHeight << endl;
+			}
 		}
 
-		// TODO long exposure infrared
+		if ( mDeviceOptions.isInfraredLongExposureEnabled() ) {
+			if ( SUCCEEDED( hr ) ) {
+				hr = infraredLongExposureFrame->get_FrameDescription( &infraredLongExposureFrameDescription );
+			}
+			if ( SUCCEEDED( hr ) ) {
+				hr = infraredLongExposureFrameDescription->get_Width( &infraredLongExposureWidth );
+			}
+			if ( SUCCEEDED( hr ) ) {
+				hr = infraredLongExposureFrameDescription->get_Height( &infraredLongExposureHeight );
+			}
+			if ( SUCCEEDED( hr ) ) {
+				hr = infraredLongExposureFrame->AccessUnderlyingBuffer( &infraredLongExposureBufferSize, &infraredLongExposureBuffer );
+			}
+			if ( SUCCEEDED( hr ) ) {
+				Channel16u infraredLongExposureChannel = Channel16u( infraredLongExposureWidth, infraredLongExposureHeight, infraredLongExposureWidth * sizeof( uint16_t ), 1, infraredLongExposureBuffer );
+				mFrame.mChannelInfraredLongExposure = Channel16u( infraredLongExposureWidth, infraredLongExposureHeight );
+				mFrame.mChannelInfraredLongExposure.copyFrom( infraredLongExposureChannel, infraredLongExposureChannel.getBounds() );
+
+				int64_t irLongExpTime = 0;
+				hr = infraredLongExposureFrame->get_RelativeTime( &irLongExpTime );
+
+				console( ) << "Infrared Long Exposure\n\twidth: " << infraredLongExposureWidth << "\n\theight: " << infraredLongExposureHeight;
+				if ( SUCCEEDED( hr ) ) {
+					console() << "\n\ttimestamp: " << irLongExpTime;
+				}
+				console() << endl;
+			}
+		}
 
 		if ( SUCCEEDED( hr ) ) {
 			// TODO build Kinect2::Frame from buffers, data
@@ -576,6 +670,10 @@ void Device::update()
 		if ( bodyFrameDescription != 0 ) {
 			bodyFrameDescription->Release();
 			bodyFrameDescription = 0;
+		}
+		if ( bodyIndexFrameDescription != 0 ) {
+			bodyIndexFrameDescription->Release();
+			bodyIndexFrameDescription = 0;
 		}
 		if ( colorFrameDescription != 0 ) {
 			colorFrameDescription->Release();
@@ -589,11 +687,23 @@ void Device::update()
 			infraredFrameDescription->Release();
 			infraredFrameDescription = 0;
 		}
+		if ( infraredLongExposureFrameDescription != 0 ) {
+			infraredLongExposureFrameDescription->Release();
+			infraredLongExposureFrameDescription = 0;
+		}
 	}
 
+	if ( audioFrame != 0 ) {
+		audioFrame->Release();
+		audioFrame = 0;
+	}
 	if ( bodyFrame != 0 ) {
 		bodyFrame->Release();
 		bodyFrame = 0;
+	}
+	if ( bodyIndexFrame != 0 ) {
+		bodyIndexFrame->Release();
+		bodyIndexFrame = 0;
 	}
 	if ( colorFrame != 0 ) {
 		colorFrame->Release();
@@ -610,6 +720,10 @@ void Device::update()
 	if ( infraredFrame != 0 ) {
 		infraredFrame->Release();
 		infraredFrame = 0;
+	}
+	if ( infraredLongExposureFrame != 0 ) {
+		infraredLongExposureFrame->Release();
+		infraredLongExposureFrame = 0;
 	}
 }
 

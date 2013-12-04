@@ -44,10 +44,14 @@ class BasicApp : public ci::app::AppBasic
 {
 public:
 	void						draw();
+	void						prepareSettings( ci::app::AppBasic::Settings* settings );
 	void						setup();
 	void						update();
 private:
-	ci::gl::TextureRef			mTexture;
+	ci::gl::TextureRef			mTextureColor;
+	ci::gl::TextureRef			mTextureDepth;
+	ci::gl::TextureRef			mTextureInfrared;
+	ci::gl::TextureRef			mTextureInfraredLongExposure;
 
 	Kinect2::DeviceRef			mDevice;
 
@@ -56,6 +60,8 @@ private:
 	ci::params::InterfaceGlRef	mParams;
 };
 
+#include "cinder/Font.h"
+
 using namespace ci;
 using namespace ci::app;
 using namespace std;
@@ -63,14 +69,36 @@ using namespace std;
 void BasicApp::draw()
 {
 	gl::setViewport( getWindowBounds() );
-	gl::clear( Colorf::black() );
+	gl::clear( Colorf::white() );
 	gl::setMatricesWindow( getWindowSize() );
 	
-	if ( mTexture ) {
-		gl::draw( mTexture, mTexture->getBounds(), getWindowBounds() );
+	if ( mTextureColor ) {
+		gl::draw( mTextureColor, mTextureColor->getBounds(), Rectf( Vec2f::zero(), getWindowCenter() ) );
+		mTextureColor->unbind();
+	}
+
+	if ( mTextureDepth ) {
+		gl::draw( mTextureDepth, mTextureDepth->getBounds(), Rectf( getWindowCenter().x, 0.0f, getWindowWidth(), getWindowCenter().y ) );
+		mTextureDepth->unbind();
+	}
+
+	if ( mTextureInfrared ) {
+		gl::draw( mTextureInfrared, mTextureInfrared->getBounds(), Rectf( 0.0f, getWindowCenter().y, getWindowCenter().x, getWindowHeight() ) );
+		mTextureInfrared->unbind();
+	}
+
+	if ( mTextureInfraredLongExposure ) {
+		gl::draw( mTextureInfraredLongExposure, mTextureInfraredLongExposure->getBounds(), Rectf( getWindowCenter(), getWindowSize() ) );
+		mTextureInfraredLongExposure->unbind();
 	}
 
 	mParams->draw();
+}
+
+void BasicApp::prepareSettings( Settings* settings )
+{
+	settings->prepareWindow( Window::Format().size( 1280, 720 ).title( "Basic App" ) );
+	settings->setFrameRate( 60.0f );
 }
 
 void BasicApp::setup()
@@ -81,7 +109,7 @@ void BasicApp::setup()
 	mFullScreen	= false;
 
 	mDevice = Kinect2::Device::create();
-	mDevice->start();
+	mDevice->start( Kinect2::DeviceOptions().enableInfrared().enableInfraredLongExposure() );
 			
 	mParams = params::InterfaceGl::create( "Params", Vec2i( 200, 150 ) );
 	mParams->addParam( "Frame rate",	&mFrameRate,				"", true );
@@ -91,7 +119,7 @@ void BasicApp::setup()
 
 void BasicApp::update()
 {
-	mFrameRate = getFrameRate();
+	mFrameRate = getAverageFps();
 	
 	if ( mFullScreen != isFullScreen() ) {
 		setFullScreen( mFullScreen );
@@ -99,8 +127,56 @@ void BasicApp::update()
 	}
 
 	if ( mDevice ) {
-		console() << mDevice->getFrame().getTimeStamp() << ": " << Kinect2::getStatusMessage( mDevice->getStatus() ) << endl;
+		if ( mDevice->getDeviceOptions().isColorEnabled() ) {
+			mTextureColor = gl::Texture::create( mDevice->getFrame().getColor() );
+		}
+		
+		if ( mDevice->getDeviceOptions().isDepthEnabled() ) {
+			const Channel16u& depthChannel16	= mDevice->getFrame().getDepth();
+			Channel8u depthChannel8				= Channel8u( depthChannel16.getWidth(), depthChannel16.getHeight() );
+			Channel16u::ConstIter depthIter16	= depthChannel16.getIter();
+			Channel8u::Iter depthIter8			= depthChannel8.getIter();
+
+			while ( depthIter8.line() && depthIter16.line() ) {
+				while ( depthIter8.pixel() && depthIter16.pixel() ) {
+					depthIter8.v() = depthIter16.v() % 256;
+				}
+			}
+
+			mTextureDepth = gl::Texture::create( depthChannel8 );
+		}
+
+		if ( mDevice->getDeviceOptions().isInfraredEnabled() ) {
+			const Channel16u& infraredChannel16		= mDevice->getFrame().getInfrared();
+			Channel8u infraredChannel8				= Channel8u( infraredChannel16.getWidth(), infraredChannel16.getHeight() );
+			Channel16u::ConstIter infraredIter16	= infraredChannel16.getIter();
+			Channel8u::Iter infraredIter8			= infraredChannel8.getIter();
+
+			while ( infraredIter8.line() && infraredIter16.line() ) {
+				while ( infraredIter8.pixel() && infraredIter16.pixel() ) {
+					infraredIter8.v() = infraredIter16.v() >> 8;
+				}
+			}
+
+			mTextureInfrared = gl::Texture::create( infraredChannel8 );
+		}
+
+		if ( mDevice->getDeviceOptions().isInfraredLongExposureEnabled() ) {
+			//const Channel16u& infraredChannel16		= mDevice->getFrame().getInfraredLongExposure();
+			//Channel8u infraredChannel8				= Channel8u( infraredChannel16.getWidth(), infraredChannel16.getHeight() );
+			//Channel16u::ConstIter infraredIter16	= infraredChannel16.getIter();
+			//Channel8u::Iter infraredIter8			= infraredChannel8.getIter();
+
+			//while ( infraredIter8.line() && infraredIter16.line() ) {
+			//	while ( infraredIter8.pixel() && infraredIter16.pixel() ) {
+			//		infraredIter8.v() = infraredIter16.v() >> 8;
+			//	}
+			//}
+
+			mTextureInfraredLongExposure = gl::Texture::create( Channel8u( mDevice->getFrame().getInfraredLongExposure() ) );
+		}
 	}
 }
 
 CINDER_APP_BASIC( BasicApp, RendererGl )
+	

@@ -75,6 +75,16 @@ string getStatusMessage( KinectStatus status )
 	}
 }
 
+Vec3f toVec3f( const CameraSpacePoint& v )
+{
+	return Vec3f( v.X, v.Y, v.Z );
+}
+
+Quatf toQuatf( const Vector4& v )
+{
+	return Quatf( v.x, v.y, v.z, v.w );
+}
+
 DeviceOptions::DeviceOptions()
 : mDeviceIndex( 0 ), mDeviceId( "" ), mEnabledAudio( false ), mEnabledBody( false ), 
 mEnabledBodyIndex( false ), mEnabledColor( true ), mEnabledDepth( true ), 
@@ -292,7 +302,7 @@ void Device::start( const DeviceOptions& deviceOptions )
 	}
 
 	if ( mSensor != 0 ) {
-		//hr = mSensor->get_CoordinateMapper( &mCoordinateMapper );
+		hr = mSensor->get_CoordinateMapper( &mCoordinateMapper );
 		hr = mSensor->Open();
 		if ( SUCCEEDED( hr ) ) {
 			long flags = 0L;
@@ -316,10 +326,6 @@ void Device::start( const DeviceOptions& deviceOptions )
 			}
 			if ( mDeviceOptions.isInfraredLongExposureEnabled() ) {
 				flags |= FrameSourceTypes::FrameSourceTypes_LongExposureInfrared;
-			}
-
-			if ( flags & FrameSourceTypes_Color ) {
-				console() << "Color enabled" << endl;
 			}
 
 			hr = mSensor->OpenMultiSourceFrameReader( flags, &mFrameReader );
@@ -360,6 +366,36 @@ const DeviceOptions& Device::getDeviceOptions() const
 const Frame& Device::getFrame() const
 {
 	return mFrame;
+}
+
+Vec2i Device::getJointPositionInColorFrame( const Vec3f& jointPosition ) const
+{
+	CameraSpacePoint pointCamera;
+	pointCamera.X = jointPosition.x;
+	pointCamera.Y = jointPosition.y;
+	pointCamera.Z = jointPosition.z;
+
+	ColorSpacePoint pointColor;
+	HRESULT hr = mCoordinateMapper->MapCameraPointToColorSpace( pointCamera, &pointColor );
+
+	if ( FAILED( hr ) ) {
+		console() << "get position in color space failed: " << hr << endl;
+	}
+
+	return Vec2i( static_cast<int32_t>( pointColor.X ), static_cast<int32_t>( pointColor.Y ) );
+}
+
+Vec2i Device::getJointPositionInDepthFrame( const Vec3f& jointPosition ) const
+{
+	CameraSpacePoint pointCamera;
+	pointCamera.X = jointPosition.x;
+	pointCamera.Y = jointPosition.y;
+	pointCamera.Z = jointPosition.z;
+
+	DepthSpacePoint pointDepth;
+	mCoordinateMapper->MapCameraPointToDepthSpace( pointCamera, &pointDepth );
+
+	return Vec2i( static_cast<int32_t>( pointDepth.X ), static_cast<int32_t>( pointDepth.Y ) );
 }
 
 KinectStatus Device::getStatus() const
@@ -470,11 +506,9 @@ void Device::update()
 
 		// TODO audio
 
-		IFrameDescription* bodyFrameDescription					= 0;
-		int32_t bodyWidth										= 0;
-		int32_t bodyHeight										= 0;
-		uint32_t bodyBufferSize									= 0;
-		uint8_t* bodyBuffer										= 0;
+		// TODO: un-hardcode 6
+		IBody* bodies[ 6 ]										= { 0 };
+		int64_t bodyTime										= 0L;
 
 		IFrameDescription* bodyIndexFrameDescription			= 0;
 		int32_t bodyIndexWidth									= 0;
@@ -518,7 +552,50 @@ void Device::update()
 
 		// TODO body
 		if ( mDeviceOptions.isBodyEnabled() ) {
+			if ( SUCCEEDED( hr ) ) {
+				hr = bodyFrame->get_RelativeTime( &bodyTime );
+			}
 
+			if ( SUCCEEDED( hr ) ) {
+				hr = bodyFrame->GetAndRefreshBodyData( 6, bodies );
+			}
+
+			if ( SUCCEEDED( hr ) ) {
+				mFrame.mUsers.clear();
+
+				// process body data
+				for ( int32_t i = 0; i < 6; ++i ) {
+					IBody* body = bodies[ i ];
+					if ( body != 0 ) {
+						BOOLEAN isTracked = false;
+						hr = body->get_IsTracked( &isTracked );
+
+						if ( SUCCEEDED( hr ) && isTracked ) {
+							Joint joints[ JointType_Count ];
+							body->GetJoints( JointType_Count, joints );
+
+							JointOrientation jointOrientations[ JointType_Count ];
+							body->GetJointOrientations( JointType_Count, jointOrientations );
+
+							User user;
+							user.mIsTracked = isTracked;
+
+							body->get_TrackingId( &user.mTrackingId );
+
+							for ( int32_t i = 0; i < JointType_Count; ++i ) {
+								User::Joint joint;
+								joint.mOrientation = toQuatf( jointOrientations[ i ].Orientation );
+								joint.mPosition = toVec3f( joints[ i ].Position );
+								joint.mTrackingState = joints[ i ].TrackingState;
+
+								user.mJointMap.insert( pair<JointType, User::Joint>( static_cast<JointType>( i ), joint ) );
+							}
+
+							mFrame.mUsers.push_back( user );
+						}
+					}
+				}
+			}
 		}
 
 		if ( mDeviceOptions.isBodyIndexEnabled() ) {
@@ -567,13 +644,24 @@ void Device::update()
 				}
 
 				if ( SUCCEEDED( hr ) ) {
-					colorFrame->get_RelativeTime( &time );
 					Surface8u colorSurface = Surface8u( colorBuffer, colorWidth, colorHeight, colorWidth * sizeof( uint8_t ) * 4, channelOrder );
 					mFrame.mSurfaceColor = Surface8u( colorWidth, colorHeight, false, channelOrder );
 					mFrame.mSurfaceColor.copyFrom( colorSurface, colorSurface.getBounds() );
 
+					hr = colorFrame->get_RelativeTime( &time );
+
+					float vFov = 0.0f;
+					float hFov = 0.0f;
+					float dFov = 0.0f;
+
+					colorFrameDescription->get_VerticalFieldOfView( &vFov );
+					colorFrameDescription->get_HorizontalFieldOfView( &hFov );
+					colorFrameDescription->get_DiagonalFieldOfView( &dFov );
+
 					console() << "Color\n\twidth: " << colorWidth << "\n\theight: " << colorHeight 
-						<< "\n\tbuffer size: " << colorBufferSize << "\n\ttime: " << time << endl;
+						<< "\n\tbuffer size: " << colorBufferSize << "\n\ttime: " << time 
+						<< "\n\tv fov: " << vFov << "\n\th fov: " << hFov << "\n\td fov: " << dFov 
+						<< endl;
 				}
 
 				if ( isAllocated && colorBuffer != 0 ) {
@@ -667,10 +755,6 @@ void Device::update()
 			mFrame.mTimeStamp = time;
 		}
 
-		if ( bodyFrameDescription != 0 ) {
-			bodyFrameDescription->Release();
-			bodyFrameDescription = 0;
-		}
 		if ( bodyIndexFrameDescription != 0 ) {
 			bodyIndexFrameDescription->Release();
 			bodyIndexFrameDescription = 0;

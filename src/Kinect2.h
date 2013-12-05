@@ -38,8 +38,10 @@
 
 #include "cinder/Exception.h"
 #include "cinder/Matrix.h"
+#include "cinder/Quaternion.h"
 #include "cinder/Surface.h"
 #include <functional>
+#include <map>
 #include "ole2.h"
 
 #if defined( _DEBUG )
@@ -98,6 +100,30 @@ protected:
 
 class Device;
 
+class User
+{
+public:
+	struct Joint
+	{
+		ci::Vec3f		mPosition;
+		ci::Quatf		mOrientation;
+		TrackingState	mTrackingState;
+	};
+
+	std::map<JointType, User::Joint>&			getJointMap() { return mJointMap; }
+	const std::map<JointType, User::Joint>&		getJointMap() const { return mJointMap; }
+
+	uint64_t									getTrackingId() const { return mTrackingId; }
+	bool										getIsTracked() const { return mIsTracked; }
+
+private:
+	std::map<JointType, User::Joint>			mJointMap;
+	bool										mIsTracked;
+	uint64_t									mTrackingId;
+
+	friend class Device;
+};
+
 class Frame
 {
 public:
@@ -109,6 +135,8 @@ public:
 	const ci::Channel16u&				getInfrared() const;
 	const ci::Channel16u&				getInfraredLongExposure() const;
 	long long							getTimeStamp() const;
+
+	const std::vector<User>&			getUsers() const { return mUsers; }
 protected:
 	Frame( long long frameId, const std::string& deviceId, const ci::Surface8u& color, 
 		const ci::Channel16u& depth, const ci::Channel16u& infrared, 
@@ -120,6 +148,8 @@ protected:
 	ci::Channel16u						mChannelInfraredLongExposure;
 	ci::Surface8u						mSurfaceColor;
 	long long							mTimeStamp;
+
+	std::vector<User>					mUsers;
 
 	friend class						Device;
 };
@@ -140,6 +170,10 @@ public:
 	const DeviceOptions&				getDeviceOptions() const;
 	const Frame&						getFrame() const;
 	KinectStatus						getStatus() const;
+
+	// mapping methods
+	ci::Vec2i							getJointPositionInColorFrame( const ci::Vec3f& jointPosition ) const;
+	ci::Vec2i							getJointPositionInDepthFrame( const ci::Vec3f& jointPosition ) const;
 protected:
 	Device();
 

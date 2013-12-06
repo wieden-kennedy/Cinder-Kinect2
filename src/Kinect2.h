@@ -115,11 +115,13 @@ public:
 
 	uint64_t									getTrackingId() const { return mTrackingId; }
 	bool										getIsTracked() const { return mIsTracked; }
+	uint8_t										getBodyIndex() const { return mBodyIndex; }
 
 private:
 	std::map<JointType, User::Joint>			mJointMap;
 	bool										mIsTracked;
 	uint64_t									mTrackingId;
+	uint8_t										mBodyIndex;
 
 	friend class Device;
 };
@@ -137,6 +139,7 @@ public:
 	long long							getTimeStamp() const;
 
 	const std::vector<User>&			getUsers() const { return mUsers; }
+	const ci::Channel8u&				getBodyIndex() const { return mChannelBodyIndex; };
 protected:
 	Frame( long long frameId, const std::string& deviceId, const ci::Surface8u& color, 
 		const ci::Channel16u& depth, const ci::Channel16u& infrared, 
@@ -147,6 +150,7 @@ protected:
 	ci::Channel16u						mChannelInfrared;
 	ci::Channel16u						mChannelInfraredLongExposure;
 	ci::Surface8u						mSurfaceColor;
+	ci::Channel8u						mChannelBodyIndex;
 	long long							mTimeStamp;
 
 	std::vector<User>					mUsers;
@@ -174,6 +178,10 @@ public:
 	// mapping methods
 	ci::Vec2i							getJointPositionInColorFrame( const ci::Vec3f& jointPosition ) const;
 	ci::Vec2i							getJointPositionInDepthFrame( const ci::Vec3f& jointPosition ) const;
+	ci::Vec2i							getDepthPointInColorFrame( const ci::Vec2i& depthPoint ) const;
+	std::vector<ci::Vec2f>				mapDepthFrameToColorFrame( const ci::Channel16u& depth ) const;
+	void								mapDepthFrameToColorFrame( const ci::Channel16u& depth, std::vector<ci::Vec2f>& points ) const;
+
 protected:
 	Device();
 

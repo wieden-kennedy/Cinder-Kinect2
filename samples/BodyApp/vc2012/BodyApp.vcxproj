@@ -129,6 +129,9 @@
       </DataExecutionPrevention>
       <IgnoreSpecificDefaultLibraries>LIBCMT;LIBCPMT</IgnoreSpecificDefaultLibraries>
     </Link>
+    <PreBuildEvent>
+      <Command>xcopy "$(KINECTSDK20_DIR)Assemblies\*.dll" "$(OutDir)" /Y /C</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -189,6 +192,9 @@
       <DataExecutionPrevention>
       </DataExecutionPrevention>
     </Link>
+    <PreBuildEvent>
+      <Command>xcopy "$(KINECTSDK20_DIR)Assemblies\*.dll" "$(OutDir)" /Y /C</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ResourceCompile Include="Resources.rc" />

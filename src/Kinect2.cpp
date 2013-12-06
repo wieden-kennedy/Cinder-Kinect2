@@ -398,6 +398,43 @@ Vec2i Device::getJointPositionInDepthFrame( const Vec3f& jointPosition ) const
 	return Vec2i( static_cast<int32_t>( pointDepth.X ), static_cast<int32_t>( pointDepth.Y ) );
 }
 
+vector<Vec2f> Device::mapDepthFrameToColorFrame( const Channel16u& depth ) const
+{
+	uint32_t numDepthPoints = depth.getWidth() * depth.getHeight();
+	uint32_t numColorPoints = numDepthPoints;
+	vector<ColorSpacePoint> colorSpacePoints( numDepthPoints );
+	
+	HRESULT hr = mCoordinateMapper->MapDepthFrameToColorSpace( numDepthPoints, depth.getData(), numColorPoints, &colorSpacePoints[ 0 ] );
+	if ( FAILED( hr ) ) {
+		return vector<Vec2f>();
+	}
+
+	vector<Vec2f> colorFramePoints( numDepthPoints );
+	transform( colorSpacePoints.begin(), colorSpacePoints.end(), colorFramePoints.begin(), []( const ColorSpacePoint& c ) -> Vec2f
+	{
+		return Vec2f( c.X, c.Y );
+	} );
+
+	return colorFramePoints;
+}
+
+void Device::mapDepthFrameToColorFrame( const Channel16u& depth,vector<Vec2f>& points ) const
+{
+	uint32_t numDepthPoints = depth.getWidth() * depth.getHeight();
+	uint32_t numColorPoints = numDepthPoints;
+	vector<ColorSpacePoint> colorSpacePoints( numDepthPoints );
+
+	HRESULT hr = mCoordinateMapper->MapDepthFrameToColorSpace( numDepthPoints, depth.getData(), numColorPoints, &colorSpacePoints[ 0 ] );
+
+	if ( SUCCEEDED( hr ) ) {
+		points.resize( numDepthPoints );
+		transform( colorSpacePoints.begin(), colorSpacePoints.end(), points.begin(), []( const ColorSpacePoint& c ) -> Vec2f
+		{
+			return Vec2f( c.X, c.Y );
+		} );
+	}
+}
+
 KinectStatus Device::getStatus() const
 {
 	return mStatus;
@@ -426,7 +463,7 @@ void Device::update()
 
 	// TODO audio
 	if ( SUCCEEDED( hr ) ) {
-		console() << "SUCCEEDED " << getElapsedFrames() << endl;
+		//console() << "SUCCEEDED " << getElapsedFrames() << endl;
 	}
 
 	if ( SUCCEEDED( hr ) && mDeviceOptions.isBodyEnabled() ) {
@@ -515,6 +552,7 @@ void Device::update()
 		int32_t bodyIndexHeight									= 0;
 		uint32_t bodyIndexBufferSize							= 0;
 		uint8_t* bodyIndexBuffer								= 0;
+		int64_t bodyIndexTime									= 0L;
 		
 		IFrameDescription* colorFrameDescription				= 0;
 		int32_t colorWidth										= 0;
@@ -564,7 +602,7 @@ void Device::update()
 				mFrame.mUsers.clear();
 
 				// process body data
-				for ( int32_t i = 0; i < 6; ++i ) {
+				for ( uint8_t i = 0; i < 6; ++i ) {
 					IBody* body = bodies[ i ];
 					if ( body != 0 ) {
 						BOOLEAN isTracked = false;
@@ -579,16 +617,17 @@ void Device::update()
 
 							User user;
 							user.mIsTracked = isTracked;
+							user.mBodyIndex = i;
 
 							body->get_TrackingId( &user.mTrackingId );
 
-							for ( int32_t i = 0; i < JointType_Count; ++i ) {
+							for ( int32_t j = 0; j < JointType_Count; ++j ) {
 								User::Joint joint;
-								joint.mOrientation = toQuatf( jointOrientations[ i ].Orientation );
-								joint.mPosition = toVec3f( joints[ i ].Position );
-								joint.mTrackingState = joints[ i ].TrackingState;
+								joint.mOrientation = toQuatf( jointOrientations[ j ].Orientation );
+								joint.mPosition = toVec3f( joints[ j ].Position );
+								joint.mTrackingState = joints[ j ].TrackingState;
 
-								user.mJointMap.insert( pair<JointType, User::Joint>( static_cast<JointType>( i ), joint ) );
+								user.mJointMap.insert( pair<JointType, User::Joint>( static_cast<JointType>( j ), joint ) );
 							}
 
 							mFrame.mUsers.push_back( user );
@@ -600,6 +639,9 @@ void Device::update()
 
 		if ( mDeviceOptions.isBodyIndexEnabled() ) {
 			if ( SUCCEEDED( hr ) ) {
+				hr = bodyIndexFrame->get_RelativeTime( &bodyIndexTime );
+			}
+			if ( SUCCEEDED( hr ) ) {
 				hr = bodyIndexFrame->get_FrameDescription( &bodyIndexFrameDescription );
 			}
 			if ( SUCCEEDED( hr ) ) {
@@ -609,7 +651,12 @@ void Device::update()
 				hr = bodyIndexFrameDescription->get_Height( &bodyIndexHeight );
 			}
 			if ( SUCCEEDED( hr ) ) {
- 				//hr = bodyIndexFrame->AccessUnderlyingBuffer( &bodyIndexBufferSize, &bodyIndexBuffer );
+ 				hr = bodyIndexFrame->AccessUnderlyingBuffer( &bodyIndexBufferSize, &bodyIndexBuffer );
+			}
+			if ( SUCCEEDED( hr ) ) {
+				Channel8u bodyIndexChannel = Channel8u( bodyIndexWidth, bodyIndexHeight, bodyIndexWidth * sizeof( uint8_t ), 1, bodyIndexBuffer );
+				mFrame.mChannelBodyIndex = Channel8u( bodyIndexWidth, bodyIndexHeight );
+				mFrame.mChannelBodyIndex.copyFrom( bodyIndexChannel, bodyIndexChannel.getBounds() );
 			}
 		}
 
@@ -658,10 +705,10 @@ void Device::update()
 					colorFrameDescription->get_HorizontalFieldOfView( &hFov );
 					colorFrameDescription->get_DiagonalFieldOfView( &dFov );
 
-					console() << "Color\n\twidth: " << colorWidth << "\n\theight: " << colorHeight 
-						<< "\n\tbuffer size: " << colorBufferSize << "\n\ttime: " << time 
-						<< "\n\tv fov: " << vFov << "\n\th fov: " << hFov << "\n\td fov: " << dFov 
-						<< endl;
+					//console() << "Color\n\twidth: " << colorWidth << "\n\theight: " << colorHeight 
+					//	<< "\n\tbuffer size: " << colorBufferSize << "\n\ttime: " << time 
+					//	<< "\n\tv fov: " << vFov << "\n\th fov: " << hFov << "\n\td fov: " << dFov 
+					//	<< endl;
 				}
 
 				if ( isAllocated && colorBuffer != 0 ) {
@@ -695,7 +742,7 @@ void Device::update()
 				mFrame.mChannelDepth = Channel16u( depthWidth, depthHeight );
 				mFrame.mChannelDepth.copyFrom( depthChannel, depthChannel.getBounds() );
 
-				console( ) << "Depth\n\twidth: " << depthWidth << "\n\theight: " << depthHeight << endl;
+				//console( ) << "Depth\n\twidth: " << depthWidth << "\n\theight: " << depthHeight << endl;
 			}
 		}
 
@@ -717,7 +764,7 @@ void Device::update()
 				mFrame.mChannelInfrared = Channel16u( infraredWidth, infraredHeight );
 				mFrame.mChannelInfrared.copyFrom( infraredChannel, infraredChannel.getBounds() );
 
-				console( ) << "Infrared\n\twidth: " << infraredWidth << "\n\theight: " << infraredHeight << endl;
+				//console( ) << "Infrared\n\twidth: " << infraredWidth << "\n\theight: " << infraredHeight << endl;
 			}
 		}
 
@@ -742,11 +789,11 @@ void Device::update()
 				int64_t irLongExpTime = 0;
 				hr = infraredLongExposureFrame->get_RelativeTime( &irLongExpTime );
 
-				console( ) << "Infrared Long Exposure\n\twidth: " << infraredLongExposureWidth << "\n\theight: " << infraredLongExposureHeight;
-				if ( SUCCEEDED( hr ) ) {
-					console() << "\n\ttimestamp: " << irLongExpTime;
-				}
-				console() << endl;
+				//console( ) << "Infrared Long Exposure\n\twidth: " << infraredLongExposureWidth << "\n\theight: " << infraredLongExposureHeight;
+				//if ( SUCCEEDED( hr ) ) {
+				//	console() << "\n\ttimestamp: " << irLongExpTime;
+				//}
+				//console() << endl;
 			}
 		}
 

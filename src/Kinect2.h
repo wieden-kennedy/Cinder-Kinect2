@@ -178,7 +178,7 @@ public:
 	// mapping methods
 	ci::Vec2i							getJointPositionInColorFrame( const ci::Vec3f& jointPosition ) const;
 	ci::Vec2i							getJointPositionInDepthFrame( const ci::Vec3f& jointPosition ) const;
-	ci::Vec2i							getDepthPointInColorFrame( const ci::Vec2i& depthPoint ) const;
+	ci::Vec2i							getDepthPointInColorFrame( const ci::Vec2i& depthPoint, uint16_t depthValue ) const;
 	std::vector<ci::Vec2f>				mapDepthFrameToColorFrame( const ci::Channel16u& depth ) const;
 	void								mapDepthFrameToColorFrame( const ci::Channel16u& depth, std::vector<ci::Vec2f>& points ) const;
 

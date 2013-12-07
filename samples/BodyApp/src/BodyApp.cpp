@@ -76,7 +76,7 @@ void BodyApp::draw()
 	if ( mDevice ) {
 		const vector<Kinect2::User>& users = mDevice->getFrame().getUsers();
 		for ( const Kinect2::User& user : users ) {
-			gl::color( kUserColors[ user.getBodyIndex() ] );
+			gl::color( getUserColor( user.getBodyIndex() ) );
 			for ( auto jointPair : user.getJointMap() ) {
 				gl::pushModelView();
 				gl::translate( jointPair.second.mPosition );
@@ -109,14 +109,14 @@ void BodyApp::draw()
 
 			const vector<Kinect2::User>& users = mDevice->getFrame().getUsers();
 			for ( const Kinect2::User& user : users ) {
-				gl::color( kUserColors[ user.getBodyIndex() ] );
+				gl::color( getUserColor( user.getBodyIndex() ) );
 				for ( auto jointPair : user.getJointMap() ) {
 					Vec2f colorPos = mDevice->getJointPositionInColorFrame( jointPair.second.mPosition );
 					colorPos *= s;
 
 					//console( ) << "scale: " << s << "\n" << "position: " << colorPos << endl;
 
-					if ( jointPair.first == JointType_SpineBase ) {
+					if ( jointPair.first == JointType_SpineMid ) {
 						gl::drawString( "User Id: " + toString( (int32_t)user.getBodyIndex() ), colorPos + Vec2f( 8.0f, 0.0f ), ColorAf( 0.0f, 1.0f, 1.0f ), mFont );
 					}
 
@@ -220,9 +220,10 @@ void BodyApp::update()
 
 				size_t userColorIndex = bodyIndexChanIt.v() % kMaxUsers;
 				if ( bodyIndexChanIt.v() < 0xff ) {
-					bodyIndexSurfIt.r() = kUserColors[ userColorIndex ].r;
-					bodyIndexSurfIt.g() = kUserColors[ userColorIndex ].g;
-					bodyIndexSurfIt.b() = kUserColors[ userColorIndex ].b;
+					Color8u userColor	= getUserColor( userColorIndex );
+					bodyIndexSurfIt.r() = userColor.r;
+					bodyIndexSurfIt.g() = userColor.g;
+					bodyIndexSurfIt.b() = userColor.b;
 					bodyIndexSurfIt.a() = 255;
 				} else {
 					bodyIndexSurfIt.r() = 0;

@@ -75,14 +75,24 @@ string getStatusMessage( KinectStatus status )
 	}
 }
 
-Vec3f toVec3f( const CameraSpacePoint& v )
+inline Vec3f toVec3f( const CameraSpacePoint& v )
 {
 	return Vec3f( v.X, v.Y, v.Z );
 }
 
-Quatf toQuatf( const Vector4& v )
+inline Quatf toQuatf( const Vector4& v )
 {
 	return Quatf( v.x, v.y, v.z, v.w );
+}
+
+inline Vec2i toVec2i( const ColorSpacePoint& v )
+{
+	return Vec2i( static_cast<int32_t>( v.X ), static_cast<int32_t>( v.Y ) );
+}
+
+inline Vec2i toVec2i( const DepthSpacePoint& v )
+{
+	return Vec2i( static_cast<int32_t>( v.X ), static_cast<int32_t>( v.Y ) );
 }
 
 DeviceOptions::DeviceOptions()
@@ -396,6 +406,23 @@ Vec2i Device::getJointPositionInDepthFrame( const Vec3f& jointPosition ) const
 	mCoordinateMapper->MapCameraPointToDepthSpace( pointCamera, &pointDepth );
 
 	return Vec2i( static_cast<int32_t>( pointDepth.X ), static_cast<int32_t>( pointDepth.Y ) );
+}
+
+Vec2i Device::getDepthPointInColorFrame( const Vec2i& depthPoint, uint16_t depthValue ) const
+{
+	DepthSpacePoint depthSpacePoint;
+	depthSpacePoint.X = depthPoint.x;
+	depthSpacePoint.Y = depthPoint.y;
+
+	ColorSpacePoint colorSpacePoint;
+
+	HRESULT hr = mCoordinateMapper->MapDepthPointToColorSpace( depthSpacePoint, depthValue, &colorSpacePoint );
+
+	if ( SUCCEEDED( hr ) ) {
+		return toVec2i( colorSpacePoint );
+	}
+
+	return Vec2i();
 }
 
 vector<Vec2f> Device::mapDepthFrameToColorFrame( const Channel16u& depth ) const

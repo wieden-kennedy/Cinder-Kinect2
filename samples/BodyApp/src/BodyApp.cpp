@@ -16,7 +16,6 @@ public:
 	void						update();
 
 private:
-	static const uint8_t		kMaxUsers;
 	static const ci::Color8u	kUserColors[];
 
 	ci::Color8u					getUserColor( uint8_t bodyIndex ) const;
@@ -42,8 +41,7 @@ using namespace ci;
 using namespace ci::app;
 using namespace std;
 
-const uint8_t BodyApp::kMaxUsers = 6;
-const ci::Color8u BodyApp::kUserColors[ BodyApp::kMaxUsers ] = {
+const ci::Color8u BodyApp::kUserColors[ BODY_COUNT ] = {
 	Color8u( 255, 0, 0 ),
 	Color8u( 255, 255, 0 ),
 	Color8u( 255, 0, 255 ),
@@ -54,7 +52,7 @@ const ci::Color8u BodyApp::kUserColors[ BodyApp::kMaxUsers ] = {
 
 Color8u BodyApp::getUserColor( uint8_t bodyIndex ) const
 {
-	if ( bodyIndex < kMaxUsers ) {
+	if ( bodyIndex < BODY_COUNT ) {
 		return kUserColors[ bodyIndex ];
 	}
 
@@ -74,13 +72,13 @@ void BodyApp::draw()
 	gl::enableWireframe();
 
 	if ( mDevice ) {
-		const vector<Kinect2::User>& users = mDevice->getFrame().getUsers();
-		for ( const Kinect2::User& user : users ) {
-			gl::color( getUserColor( user.getBodyIndex() ) );
-			for ( auto jointPair : user.getJointMap() ) {
+		const vector<Kinect2::Body>& bodies = mDevice->getFrame().getBodies();
+		for ( const Kinect2::Body& body : bodies ) {
+			gl::color( getUserColor( body.getIndex() ) );
+			for ( const auto& joint : body.getJointMap() ) {
 				gl::pushModelView();
-				gl::translate( jointPair.second.mPosition );
-				gl::rotate( jointPair.second.mOrientation );
+				gl::translate( joint.second.getPosition() );
+				gl::rotate( joint.second.getOrientation() );
 				gl::scale( 0.05f, 0.05f, 0.05f );
 				gl::drawCube( Vec3f::zero(), Vec3f::one() );
 				gl::popModelView();
@@ -107,17 +105,17 @@ void BodyApp::draw()
 		if ( mDevice ) {
 			Vec2f s = Vec2f( viewport.getSize() ) / Vec2f( mTextureColor->getSize() );
 
-			const vector<Kinect2::User>& users = mDevice->getFrame().getUsers();
-			for ( const Kinect2::User& user : users ) {
-				gl::color( getUserColor( user.getBodyIndex() ) );
-				for ( auto jointPair : user.getJointMap() ) {
-					Vec2f colorPos = mDevice->getJointPositionInColorFrame( jointPair.second.mPosition );
+			const vector<Kinect2::Body>& bodies = mDevice->getFrame().getBodies();
+			for ( const Kinect2::Body& body : bodies ) {
+				gl::color( getUserColor( body.getIndex() ) );
+				for ( const auto& joint : body.getJointMap() ) {
+					Vec2f colorPos = mDevice->mapBodyCoordToColor( joint.second.getPosition() );
 					colorPos *= s;
 
 					//console( ) << "scale: " << s << "\n" << "position: " << colorPos << endl;
 
-					if ( jointPair.first == JointType_SpineMid ) {
-						gl::drawString( "User Id: " + toString( (int32_t)user.getBodyIndex() ), colorPos + Vec2f( 8.0f, 0.0f ), ColorAf( 0.0f, 1.0f, 1.0f ), mFont );
+					if ( joint.first == JointType_SpineMid ) {
+						gl::drawString( "User Id: " + toString( (int32_t)body.getIndex() ), colorPos + Vec2f( 8.0f, 0.0f ), ColorAf( 0.0f, 1.0f, 1.0f ), mFont );
 					}
 
 					gl::drawSolidCircle( colorPos, 5.0f );
@@ -216,9 +214,9 @@ void BodyApp::update()
 
 		while ( depth16It.line() && depth8It.line() && bodyIndexChanIt.line() && bodyIndexSurfIt.line() ) {
 			while ( depth16It.pixel() && depth8It.pixel() && bodyIndexChanIt.pixel() && bodyIndexSurfIt.pixel() ) {
-				depth8It.v() = depth16It.v() % 256;
+				depth8It.v() = depth16It.v() >> 4;
 
-				size_t userColorIndex = bodyIndexChanIt.v() % kMaxUsers;
+				size_t userColorIndex = bodyIndexChanIt.v() % BODY_COUNT;
 				if ( bodyIndexChanIt.v() < 0xff ) {
 					Color8u userColor	= getUserColor( userColorIndex );
 					bodyIndexSurfIt.r() = userColor.r;

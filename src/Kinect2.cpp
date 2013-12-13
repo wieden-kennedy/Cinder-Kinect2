@@ -95,6 +95,8 @@ inline Vec2i toVec2i( const DepthSpacePoint& v )
 	return Vec2i( static_cast<int32_t>( v.X ), static_cast<int32_t>( v.Y ) );
 }
 
+//////////////////////////////////////////////////////////////////////////////////////////////
+
 DeviceOptions::DeviceOptions()
 : mDeviceIndex( 0 ), mDeviceId( "" ), mEnabledAudio( false ), mEnabledBody( false ), 
 mEnabledBodyIndex( false ), mEnabledColor( true ), mEnabledDepth( true ), 
@@ -203,6 +205,65 @@ bool DeviceOptions::isInfraredLongExposureEnabled() const
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
+Body::Joint::Joint()
+: mOrientation( Quatf() ), mPosition( Vec3f::zero() ), mTrackingState( TrackingState::TrackingState_NotTracked )
+{
+}
+
+Body::Joint::Joint( const Vec3f& position, const Quatf& orientation, TrackingState trackingState )
+: mOrientation( orientation ), mPosition( position ), mTrackingState( trackingState )
+{
+}
+
+const Vec3f& Body::Joint::getPosition() const
+{
+	return mPosition;
+}
+
+const Quatf& Body::Joint::getOrientation() const
+{
+	return mOrientation;
+}
+
+TrackingState Body::Joint::getTrackingState() const
+{
+	return mTrackingState;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+
+Body::Body()
+: mId( 0 ), mIndex( 0 ), mTracked( false )
+{
+}
+
+Body::Body( uint64_t id, uint8_t index, const map<JointType, Body::Joint>& jointMap )
+: mId( id ), mIndex( index ), mJointMap( jointMap ), mTracked( true )
+{
+}
+
+uint64_t Body::getId() const 
+{ 
+	return mId; 
+}
+
+uint8_t Body::getIndex() const 
+{ 
+	return mIndex; 
+}
+
+const map<JointType, Body::Joint>& Body::getJointMap() const 
+{ 
+	return mJointMap; 
+}
+
+bool Body::isTracked() const 
+{ 
+	return mTracked; 
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+
 Frame::Frame()
 : mDeviceId( "" ), mTimeStamp( 0L )
 {
@@ -215,6 +276,16 @@ Frame::Frame( long long time, const string& deviceId, const Surface8u& color,
 mChannelInfraredLongExposure( infraredLongExposure ), mDeviceId( deviceId ), 
 mTimeStamp( time )
 {
+}
+
+const vector<Body>& Frame::getBodies() const
+{
+	return mBodies;
+}
+
+const Channel8u& Frame::getBodyIndex() const
+{
+	return mChannelBodyIndex;
 }
 
 const Surface8u& Frame::getColor() const
@@ -287,6 +358,7 @@ void Device::start( const DeviceOptions& deviceOptions )
 
 	hr			= S_OK;
 	int32_t i	= 0;
+
 	while ( SUCCEEDED( hr ) && i < 8 ) { // TODO find actual max device count
 		hr = sensorEnum->GetNext( &mSensor );
 		if ( mSensor != 0 ) {
@@ -378,54 +450,56 @@ const Frame& Device::getFrame() const
 	return mFrame;
 }
 
-Vec2i Device::getJointPositionInColorFrame( const Vec3f& jointPosition ) const
+KinectStatus Device::getStatus() const
 {
-	CameraSpacePoint pointCamera;
-	pointCamera.X = jointPosition.x;
-	pointCamera.Y = jointPosition.y;
-	pointCamera.Z = jointPosition.z;
-
-	ColorSpacePoint pointColor;
-	HRESULT hr = mCoordinateMapper->MapCameraPointToColorSpace( pointCamera, &pointColor );
-
-	if ( FAILED( hr ) ) {
-		console() << "get position in color space failed: " << hr << endl;
-	}
-
-	return Vec2i( static_cast<int32_t>( pointColor.X ), static_cast<int32_t>( pointColor.Y ) );
+	return mStatus;
 }
 
-Vec2i Device::getJointPositionInDepthFrame( const Vec3f& jointPosition ) const
+Vec2i Device::mapBodyCoordToColor( const Vec3f& v ) const
 {
-	CameraSpacePoint pointCamera;
-	pointCamera.X = jointPosition.x;
-	pointCamera.Y = jointPosition.y;
-	pointCamera.Z = jointPosition.z;
-
-	DepthSpacePoint pointDepth;
-	mCoordinateMapper->MapCameraPointToDepthSpace( pointCamera, &pointDepth );
-
-	return Vec2i( static_cast<int32_t>( pointDepth.X ), static_cast<int32_t>( pointDepth.Y ) );
-}
-
-Vec2i Device::getDepthPointInColorFrame( const Vec2i& depthPoint, uint16_t depthValue ) const
-{
-	DepthSpacePoint depthSpacePoint;
-	depthSpacePoint.X = depthPoint.x;
-	depthSpacePoint.Y = depthPoint.y;
+	CameraSpacePoint cameraSpacePoint;
+	cameraSpacePoint.X = v.x;
+	cameraSpacePoint.Y = v.y;
+	cameraSpacePoint.Z = v.z;
 
 	ColorSpacePoint colorSpacePoint;
-
-	HRESULT hr = mCoordinateMapper->MapDepthPointToColorSpace( depthSpacePoint, depthValue, &colorSpacePoint );
-
+	long hr = mCoordinateMapper->MapCameraPointToColorSpace( cameraSpacePoint, &colorSpacePoint );
 	if ( SUCCEEDED( hr ) ) {
-		return toVec2i( colorSpacePoint );
+		return Vec2i( static_cast<int32_t>( colorSpacePoint.X ), static_cast<int32_t>( colorSpacePoint.Y ) );
 	}
-
 	return Vec2i();
 }
 
-vector<Vec2f> Device::mapDepthFrameToColorFrame( const Channel16u& depth ) const
+Vec2i Device::mapBodyCoordToDepth( const Vec3f& v ) const
+{
+	CameraSpacePoint cameraSpacePoint;
+	cameraSpacePoint.X = v.x;
+	cameraSpacePoint.Y = v.y;
+	cameraSpacePoint.Z = v.z;
+
+	DepthSpacePoint depthSpacePoint;
+	long hr = mCoordinateMapper->MapCameraPointToDepthSpace( cameraSpacePoint, &depthSpacePoint );
+	if ( SUCCEEDED( hr ) ) {
+		return Vec2i( static_cast<int32_t>( depthSpacePoint.X ), static_cast<int32_t>( depthSpacePoint.Y ) );
+	}
+	return Vec2i();
+}
+
+Vec2i Device::mapDepthCoordToColor( const Vec2i& v, uint16_t depth ) const
+{
+	DepthSpacePoint depthSpacePoint;
+	depthSpacePoint.X = (float)v.x;
+	depthSpacePoint.Y = (float)v.y;
+
+	ColorSpacePoint colorSpacePoint;
+	long hr = mCoordinateMapper->MapDepthPointToColorSpace( depthSpacePoint, depth, &colorSpacePoint );
+	if ( SUCCEEDED( hr ) ) {
+		return toVec2i( colorSpacePoint );
+	}
+	return Vec2i();
+}
+
+vector<Vec2f> Device::mapDepthFrameToColor( const Channel16u& depth ) const
 {
 	uint32_t numDepthPoints = depth.getWidth() * depth.getHeight();
 	uint32_t numColorPoints = numDepthPoints;
@@ -443,28 +517,6 @@ vector<Vec2f> Device::mapDepthFrameToColorFrame( const Channel16u& depth ) const
 	} );
 
 	return colorFramePoints;
-}
-
-void Device::mapDepthFrameToColorFrame( const Channel16u& depth,vector<Vec2f>& points ) const
-{
-	uint32_t numDepthPoints = depth.getWidth() * depth.getHeight();
-	uint32_t numColorPoints = numDepthPoints;
-	vector<ColorSpacePoint> colorSpacePoints( numDepthPoints );
-
-	HRESULT hr = mCoordinateMapper->MapDepthFrameToColorSpace( numDepthPoints, depth.getData(), numColorPoints, &colorSpacePoints[ 0 ] );
-
-	if ( SUCCEEDED( hr ) ) {
-		points.resize( numDepthPoints );
-		transform( colorSpacePoints.begin(), colorSpacePoints.end(), points.begin(), []( const ColorSpacePoint& c ) -> Vec2f
-		{
-			return Vec2f( c.X, c.Y );
-		} );
-	}
-}
-
-KinectStatus Device::getStatus() const
-{
-	return mStatus;
 }
 
 void Device::update()
@@ -566,14 +618,15 @@ void Device::update()
 	}
 
 	if ( SUCCEEDED( hr ) ) {
-		long long time											= 0L;
+		long long timeStamp										= 0L;
 
 		// TODO audio
 
-		// TODO: un-hardcode 6
-		IBody* bodies[ 6 ]										= { 0 };
+		std::vector<Body> bodies;
 		int64_t bodyTime										= 0L;
-
+		IBody* kinectBodies[ BODY_COUNT ]						= { 0 };
+		
+		Channel8u bodyIndexChannel;
 		IFrameDescription* bodyIndexFrameDescription			= 0;
 		int32_t bodyIndexWidth									= 0;
 		int32_t bodyIndexHeight									= 0;
@@ -581,13 +634,15 @@ void Device::update()
 		uint8_t* bodyIndexBuffer								= 0;
 		int64_t bodyIndexTime									= 0L;
 		
+		Surface8u colorSurface;
 		IFrameDescription* colorFrameDescription				= 0;
 		int32_t colorWidth										= 0;
 		int32_t colorHeight										= 0;
-		ColorImageFormat imageFormat							= ColorImageFormat_None;
+		ColorImageFormat colorImageFormat						= ColorImageFormat_None;
 		uint32_t colorBufferSize								= 0;
 		uint8_t* colorBuffer									= 0;
 
+		Channel16u depthChannel;
 		IFrameDescription* depthFrameDescription				= 0;
 		int32_t depthWidth										= 0;
 		int32_t depthHeight										= 0;
@@ -596,68 +651,61 @@ void Device::update()
 		uint32_t depthBufferSize								= 0;
 		uint16_t* depthBuffer									= 0;
 
+		Channel16u infraredChannel;
 		IFrameDescription* infraredFrameDescription				= 0;
 		int32_t infraredWidth									= 0;
 		int32_t infraredHeight									= 0;
 		uint32_t infraredBufferSize								= 0;
 		uint16_t* infraredBuffer								= 0;
 
+		Channel16u infraredLongExposureChannel;
 		IFrameDescription* infraredLongExposureFrameDescription	= 0;
 		int32_t infraredLongExposureWidth						= 0;
 		int32_t infraredLongExposureHeight						= 0;
 		uint32_t infraredLongExposureBufferSize					= 0;
 		uint16_t* infraredLongExposureBuffer					= 0;
 
-		hr = depthFrame->get_RelativeTime( &time );
+		hr = depthFrame->get_RelativeTime( &timeStamp );
 
 		// TODO audio
 		if ( mDeviceOptions.isAudioEnabled() ) {
 
 		}
 
-		// TODO body
 		if ( mDeviceOptions.isBodyEnabled() ) {
 			if ( SUCCEEDED( hr ) ) {
 				hr = bodyFrame->get_RelativeTime( &bodyTime );
 			}
-
 			if ( SUCCEEDED( hr ) ) {
-				hr = bodyFrame->GetAndRefreshBodyData( 6, bodies );
+				hr = bodyFrame->GetAndRefreshBodyData( BODY_COUNT, kinectBodies );
 			}
-
 			if ( SUCCEEDED( hr ) ) {
-				mFrame.mUsers.clear();
-
-				// process body data
 				for ( uint8_t i = 0; i < 6; ++i ) {
-					IBody* body = bodies[ i ];
-					if ( body != 0 ) {
-						BOOLEAN isTracked = false;
-						hr = body->get_IsTracked( &isTracked );
-
+					IBody* kinectBody = kinectBodies[ i ];
+					if ( kinectBody != 0 ) {
+						uint8_t isTracked	= false;
+						hr					= kinectBody->get_IsTracked( &isTracked );
 						if ( SUCCEEDED( hr ) && isTracked ) {
 							Joint joints[ JointType_Count ];
-							body->GetJoints( JointType_Count, joints );
+							kinectBody->GetJoints( JointType_Count, joints );
 
 							JointOrientation jointOrientations[ JointType_Count ];
-							body->GetJointOrientations( JointType_Count, jointOrientations );
+							kinectBody->GetJointOrientations( JointType_Count, jointOrientations );
 
-							User user;
-							user.mIsTracked = isTracked;
-							user.mBodyIndex = i;
+							uint64_t id = 0;
+							kinectBody->get_TrackingId( &id );
 
-							body->get_TrackingId( &user.mTrackingId );
-
+							std::map<JointType, Body::Joint> jointMap;
 							for ( int32_t j = 0; j < JointType_Count; ++j ) {
-								User::Joint joint;
-								joint.mOrientation = toQuatf( jointOrientations[ j ].Orientation );
-								joint.mPosition = toVec3f( joints[ j ].Position );
-								joint.mTrackingState = joints[ j ].TrackingState;
-
-								user.mJointMap.insert( pair<JointType, User::Joint>( static_cast<JointType>( j ), joint ) );
+								Body::Joint joint( 
+									toVec3f( joints[ j ].Position ), 
+									toQuatf( jointOrientations[ j ].Orientation ), 
+									joints[ j ].TrackingState
+									);
+								jointMap.insert( pair<JointType, Body::Joint>( static_cast<JointType>( j ), joint ) );
 							}
-
-							mFrame.mUsers.push_back( user );
+							Body body( id, i, jointMap );
+							bodies.push_back( body );
 						}
 					}
 				}
@@ -681,15 +729,22 @@ void Device::update()
  				hr = bodyIndexFrame->AccessUnderlyingBuffer( &bodyIndexBufferSize, &bodyIndexBuffer );
 			}
 			if ( SUCCEEDED( hr ) ) {
-				Channel8u bodyIndexChannel = Channel8u( bodyIndexWidth, bodyIndexHeight, bodyIndexWidth * sizeof( uint8_t ), 1, bodyIndexBuffer );
-				mFrame.mChannelBodyIndex = Channel8u( bodyIndexWidth, bodyIndexHeight );
-				mFrame.mChannelBodyIndex.copyFrom( bodyIndexChannel, bodyIndexChannel.getBounds() );
+				bodyIndexChannel = Channel8u( bodyIndexWidth, bodyIndexHeight );
+				memcpy( bodyIndexChannel.getData(), bodyIndexBuffer, bodyIndexWidth * bodyIndexHeight * sizeof( uint8_t ) );
 			}
 		}
 
 		if ( mDeviceOptions.isColorEnabled() ) {
 			if ( SUCCEEDED( hr ) ) {
 				hr = colorFrame->get_FrameDescription( &colorFrameDescription );
+				if ( SUCCEEDED( hr ) ) {
+					float vFov = 0.0f;
+					float hFov = 0.0f;
+					float dFov = 0.0f;
+					colorFrameDescription->get_VerticalFieldOfView( &vFov );
+					colorFrameDescription->get_HorizontalFieldOfView( &hFov );
+					colorFrameDescription->get_DiagonalFieldOfView( &dFov );
+				}
 			}
 			if ( SUCCEEDED( hr ) ) {
 				hr = colorFrameDescription->get_Width( &colorWidth );
@@ -698,50 +753,20 @@ void Device::update()
 				hr = colorFrameDescription->get_Height( &colorHeight );
 			}
 			if ( SUCCEEDED( hr ) ) {
-				hr = colorFrame->get_RawColorImageFormat( &imageFormat );
+				hr = colorFrame->get_RawColorImageFormat( &colorImageFormat );
 			}
 			if ( SUCCEEDED( hr ) ) {
-				bool isAllocated	= false;
-				SurfaceChannelOrder channelOrder = SurfaceChannelOrder::BGRA;
-				if ( imageFormat == ColorImageFormat_Bgra ) {
-					hr = colorFrame->AccessRawUnderlyingBuffer( &colorBufferSize, reinterpret_cast<uint8_t**>( &colorBuffer ) );
-					channelOrder = SurfaceChannelOrder::BGRA;
-				} else if ( imageFormat == ColorImageFormat_Rgba ) {
-					hr = colorFrame->AccessRawUnderlyingBuffer( &colorBufferSize, reinterpret_cast<uint8_t**>( &colorBuffer ) );
-					channelOrder = SurfaceChannelOrder::RGBA;
-				} else {
-					isAllocated = true;
-					colorBufferSize = colorWidth * colorHeight * sizeof( uint8_t ) * 4;
-					colorBuffer = new uint8_t[ colorBufferSize ];
-					hr = colorFrame->CopyConvertedFrameDataToArray( colorBufferSize, reinterpret_cast<uint8_t*>( colorBuffer ), ColorImageFormat_Rgba );
-					channelOrder = SurfaceChannelOrder::RGBA;
-				}
-
+				colorBufferSize = colorWidth * colorHeight * sizeof( uint8_t ) * 4;
+				colorBuffer		= new uint8_t[ colorBufferSize ];
+				hr = colorFrame->CopyConvertedFrameDataToArray( colorBufferSize, reinterpret_cast<uint8_t*>( colorBuffer ), ColorImageFormat_Rgba );
+			
 				if ( SUCCEEDED( hr ) ) {
-					Surface8u colorSurface = Surface8u( colorBuffer, colorWidth, colorHeight, colorWidth * sizeof( uint8_t ) * 4, channelOrder );
-					mFrame.mSurfaceColor = Surface8u( colorWidth, colorHeight, false, channelOrder );
-					mFrame.mSurfaceColor.copyFrom( colorSurface, colorSurface.getBounds() );
-
-					hr = colorFrame->get_RelativeTime( &time );
-
-					float vFov = 0.0f;
-					float hFov = 0.0f;
-					float dFov = 0.0f;
-
-					colorFrameDescription->get_VerticalFieldOfView( &vFov );
-					colorFrameDescription->get_HorizontalFieldOfView( &hFov );
-					colorFrameDescription->get_DiagonalFieldOfView( &dFov );
-
-					//console() << "Color\n\twidth: " << colorWidth << "\n\theight: " << colorHeight 
-					//	<< "\n\tbuffer size: " << colorBufferSize << "\n\ttime: " << time 
-					//	<< "\n\tv fov: " << vFov << "\n\th fov: " << hFov << "\n\td fov: " << dFov 
-					//	<< endl;
+					colorSurface = Surface8u( colorWidth, colorHeight, false, SurfaceChannelOrder::RGBA );
+					memcpy( colorSurface.getData(), colorBuffer, colorWidth * colorHeight * sizeof( uint8_t ) * 4 );
 				}
 
-				if ( isAllocated && colorBuffer != 0 ) {
-					delete[] colorBuffer;
-					colorBuffer = 0;
-				}
+				delete [] colorBuffer;
+				colorBuffer = 0;
 			}
 		}
 
@@ -765,11 +790,8 @@ void Device::update()
 				hr = depthFrame->AccessUnderlyingBuffer( &depthBufferSize, &depthBuffer );
 			}
 			if ( SUCCEEDED( hr ) ) {
-				Channel16u depthChannel = Channel16u( depthWidth, depthHeight, depthWidth * sizeof( uint16_t ), 1, depthBuffer );
-				mFrame.mChannelDepth = Channel16u( depthWidth, depthHeight );
-				mFrame.mChannelDepth.copyFrom( depthChannel, depthChannel.getBounds() );
-
-				//console( ) << "Depth\n\twidth: " << depthWidth << "\n\theight: " << depthHeight << endl;
+				depthChannel = Channel16u( depthWidth, depthHeight );
+				memcpy( depthChannel.getData(), depthBuffer, depthWidth * depthHeight * sizeof( uint16_t ) );
 			}
 		}
 
@@ -787,11 +809,8 @@ void Device::update()
 				hr = infraredFrame->AccessUnderlyingBuffer( &infraredBufferSize, &infraredBuffer );
 			}
 			if ( SUCCEEDED( hr ) ) {
-				Channel16u infraredChannel = Channel16u( infraredWidth, infraredHeight, infraredWidth * sizeof( uint16_t ), 1, infraredBuffer );
-				mFrame.mChannelInfrared = Channel16u( infraredWidth, infraredHeight );
-				mFrame.mChannelInfrared.copyFrom( infraredChannel, infraredChannel.getBounds() );
-
-				//console( ) << "Infrared\n\twidth: " << infraredWidth << "\n\theight: " << infraredHeight << endl;
+				infraredChannel = Channel16u( infraredWidth, infraredHeight );
+				memcpy( infraredChannel.getData(), infraredBuffer,  infraredWidth * infraredHeight * sizeof( uint16_t ) );
 			}
 		}
 
@@ -809,24 +828,20 @@ void Device::update()
 				hr = infraredLongExposureFrame->AccessUnderlyingBuffer( &infraredLongExposureBufferSize, &infraredLongExposureBuffer );
 			}
 			if ( SUCCEEDED( hr ) ) {
-				Channel16u infraredLongExposureChannel = Channel16u( infraredLongExposureWidth, infraredLongExposureHeight, infraredLongExposureWidth * sizeof( uint16_t ), 1, infraredLongExposureBuffer );
-				mFrame.mChannelInfraredLongExposure = Channel16u( infraredLongExposureWidth, infraredLongExposureHeight );
-				mFrame.mChannelInfraredLongExposure.copyFrom( infraredLongExposureChannel, infraredLongExposureChannel.getBounds() );
-
-				int64_t irLongExpTime = 0;
-				hr = infraredLongExposureFrame->get_RelativeTime( &irLongExpTime );
-
-				//console( ) << "Infrared Long Exposure\n\twidth: " << infraredLongExposureWidth << "\n\theight: " << infraredLongExposureHeight;
-				//if ( SUCCEEDED( hr ) ) {
-				//	console() << "\n\ttimestamp: " << irLongExpTime;
-				//}
-				//console() << endl;
+				infraredLongExposureChannel = Channel16u( infraredLongExposureWidth, infraredLongExposureHeight );
+				memcpy( infraredLongExposureChannel.getData(), infraredLongExposureBuffer, infraredLongExposureWidth * infraredLongExposureHeight * sizeof( uint16_t ) );
 			}
 		}
 
 		if ( SUCCEEDED( hr ) ) {
-			// TODO build Kinect2::Frame from buffers, data
-			mFrame.mTimeStamp = time;
+			mFrame.mBodies						= bodies;
+			mFrame.mChannelBodyIndex			= bodyIndexChannel;
+			mFrame.mChannelDepth				= depthChannel;
+			mFrame.mChannelInfrared				= infraredChannel;
+			mFrame.mChannelInfraredLongExposure	= infraredLongExposureChannel;
+			mFrame.mDeviceId					= mDeviceOptions.getDeviceId();
+			mFrame.mSurfaceColor				= colorSurface;
+			mFrame.mTimeStamp					= timeStamp;
 		}
 
 		if ( bodyIndexFrameDescription != 0 ) {

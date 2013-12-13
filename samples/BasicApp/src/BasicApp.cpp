@@ -48,12 +48,8 @@ public:
 	void						setup();
 	void						update();
 private:
-	ci::gl::TextureRef			mTextureColor;
-	ci::gl::TextureRef			mTextureDepth;
-	ci::gl::TextureRef			mTextureInfrared;
-	ci::gl::TextureRef			mTextureInfraredLongExposure;
-
 	Kinect2::DeviceRef			mDevice;
+	Kinect2::Frame				mFrame;
 
 	float						mFrameRate;
 	bool						mFullScreen;
@@ -72,24 +68,31 @@ void BasicApp::draw()
 	gl::clear( Colorf::white() );
 	gl::setMatricesWindow( getWindowSize() );
 	
-	if ( mTextureColor ) {
-		gl::draw( mTextureColor, mTextureColor->getBounds(), Rectf( Vec2f::zero(), getWindowCenter() ) );
-		mTextureColor->unbind();
+	if ( mFrame.getColor() ) {
+		gl::TextureRef tex = gl::Texture::create( mFrame.getColor() );
+		gl::draw( tex, tex->getBounds(), Rectf( Vec2f::zero(), getWindowCenter() ) );
 	}
+	if ( mFrame.getDepth() ) {
+		// Pump up the volume
+        Channel8u depth					= Channel8u( mFrame.getDepth().getWidth(), mFrame.getDepth().getHeight() );
+        Channel16u::ConstIter iter16	= mFrame.getDepth().getIter();
+        Channel8u::Iter iter8			= depth.getIter();
+		while ( iter8.line() && iter16.line() ) {
+			while ( iter8.pixel() && iter16.pixel() ) {
+				iter8.v()				= iter16.v() >> 4;
+			}
+		}
 
-	if ( mTextureDepth ) {
-		gl::draw( mTextureDepth, mTextureDepth->getBounds(), Rectf( getWindowCenter().x, 0.0f, getWindowWidth(), getWindowCenter().y ) );
-		mTextureDepth->unbind();
+		gl::TextureRef tex = gl::Texture::create( depth );
+		gl::draw( tex, tex->getBounds(), Rectf( getWindowCenter().x, 0.0f, (float)getWindowWidth(), getWindowCenter().y ) );
 	}
-
-	if ( mTextureInfrared ) {
-		gl::draw( mTextureInfrared, mTextureInfrared->getBounds(), Rectf( 0.0f, getWindowCenter().y, getWindowCenter().x, getWindowHeight() ) );
-		mTextureInfrared->unbind();
+	if ( mFrame.getInfrared() ) {
+		gl::TextureRef tex = gl::Texture::create( mFrame.getInfrared() );
+		gl::draw( tex, tex->getBounds(), Rectf( 0.0f, getWindowCenter().y, getWindowCenter().x, (float)getWindowHeight() ) );
 	}
-
-	if ( mTextureInfraredLongExposure ) {
-		gl::draw( mTextureInfraredLongExposure, mTextureInfraredLongExposure->getBounds(), Rectf( getWindowCenter(), getWindowSize() ) );
-		mTextureInfraredLongExposure->unbind();
+	if ( mDevice->getDeviceOptions().isInfraredLongExposureEnabled() ) {
+		gl::TextureRef tex = gl::Texture::create( Channel8u( mFrame.getInfraredLongExposure() ) );
+		gl::draw( tex, tex->getBounds(), Rectf( getWindowCenter(), Vec2f( getWindowSize() ) ) );
 	}
 
 	mParams->draw();
@@ -126,55 +129,8 @@ void BasicApp::update()
 		mFullScreen = isFullScreen();
 	}
 
-	if ( mDevice ) {
-		if ( mDevice->getDeviceOptions().isColorEnabled() ) {
-			mTextureColor = gl::Texture::create( mDevice->getFrame().getColor() );
-		}
-		
-		if ( mDevice->getDeviceOptions().isDepthEnabled() ) {
-			const Channel16u& depthChannel16	= mDevice->getFrame().getDepth();
-			Channel8u depthChannel8				= Channel8u( depthChannel16.getWidth(), depthChannel16.getHeight() );
-			Channel16u::ConstIter depthIter16	= depthChannel16.getIter();
-			Channel8u::Iter depthIter8			= depthChannel8.getIter();
-
-			while ( depthIter8.line() && depthIter16.line() ) {
-				while ( depthIter8.pixel() && depthIter16.pixel() ) {
-					depthIter8.v() = depthIter16.v() % 256;
-				}
-			}
-
-			mTextureDepth = gl::Texture::create( depthChannel8 );
-		}
-
-		if ( mDevice->getDeviceOptions().isInfraredEnabled() ) {
-			const Channel16u& infraredChannel16		= mDevice->getFrame().getInfrared();
-			Channel8u infraredChannel8				= Channel8u( infraredChannel16.getWidth(), infraredChannel16.getHeight() );
-			Channel16u::ConstIter infraredIter16	= infraredChannel16.getIter();
-			Channel8u::Iter infraredIter8			= infraredChannel8.getIter();
-
-			while ( infraredIter8.line() && infraredIter16.line() ) {
-				while ( infraredIter8.pixel() && infraredIter16.pixel() ) {
-					infraredIter8.v() = infraredIter16.v() >> 8;
-				}
-			}
-
-			mTextureInfrared = gl::Texture::create( infraredChannel8 );
-		}
-
-		if ( mDevice->getDeviceOptions().isInfraredLongExposureEnabled() ) {
-			//const Channel16u& infraredChannel16		= mDevice->getFrame().getInfraredLongExposure();
-			//Channel8u infraredChannel8				= Channel8u( infraredChannel16.getWidth(), infraredChannel16.getHeight() );
-			//Channel16u::ConstIter infraredIter16	= infraredChannel16.getIter();
-			//Channel8u::Iter infraredIter8			= infraredChannel8.getIter();
-
-			//while ( infraredIter8.line() && infraredIter16.line() ) {
-			//	while ( infraredIter8.pixel() && infraredIter16.pixel() ) {
-			//		infraredIter8.v() = infraredIter16.v() >> 8;
-			//	}
-			//}
-
-			mTextureInfraredLongExposure = gl::Texture::create( Channel8u( mDevice->getFrame().getInfraredLongExposure() ) );
-		}
+	if ( mDevice && mDevice->getFrame().getTimeStamp() > mFrame.getTimeStamp() ) {
+		mFrame = mDevice->getFrame();
 	}
 }
 

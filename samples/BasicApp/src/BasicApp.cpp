@@ -1,6 +1,7 @@
 /*
 * 
-* Copyright (c) 2013, Wieden+Kennedy, Stephen Schieberl
+* Copyright (c) 2013, Wieden+Kennedy
+* Stephen Schieberl, Michael Latzoni
 * All rights reserved.
 * 
 * Redistribution and use in source and binary forms, with or 
@@ -65,33 +66,24 @@ using namespace std;
 void BasicApp::draw()
 {
 	gl::setViewport( getWindowBounds() );
-	gl::clear( Colorf::white() );
+	gl::clear();
 	gl::setMatricesWindow( getWindowSize() );
+	gl::enableAlphaBlending();
 	
 	if ( mFrame.getColor() ) {
 		gl::TextureRef tex = gl::Texture::create( mFrame.getColor() );
 		gl::draw( tex, tex->getBounds(), Rectf( Vec2f::zero(), getWindowCenter() ) );
 	}
 	if ( mFrame.getDepth() ) {
-		// Pump up the volume
-        Channel8u depth					= Channel8u( mFrame.getDepth().getWidth(), mFrame.getDepth().getHeight() );
-        Channel16u::ConstIter iter16	= mFrame.getDepth().getIter();
-        Channel8u::Iter iter8			= depth.getIter();
-		while ( iter8.line() && iter16.line() ) {
-			while ( iter8.pixel() && iter16.pixel() ) {
-				iter8.v()				= iter16.v() >> 4;
-			}
-		}
-
-		gl::TextureRef tex = gl::Texture::create( depth );
+		gl::TextureRef tex = gl::Texture::create( Kinect2::channel16To8( mFrame.getDepth() ) );
 		gl::draw( tex, tex->getBounds(), Rectf( getWindowCenter().x, 0.0f, (float)getWindowWidth(), getWindowCenter().y ) );
 	}
 	if ( mFrame.getInfrared() ) {
 		gl::TextureRef tex = gl::Texture::create( mFrame.getInfrared() );
 		gl::draw( tex, tex->getBounds(), Rectf( 0.0f, getWindowCenter().y, getWindowCenter().x, (float)getWindowHeight() ) );
 	}
-	if ( mDevice->getDeviceOptions().isInfraredLongExposureEnabled() ) {
-		gl::TextureRef tex = gl::Texture::create( Channel8u( mFrame.getInfraredLongExposure() ) );
+	if ( mFrame.getBodyIndex() ) {
+		gl::TextureRef tex = gl::Texture::create( Kinect2::colorizeBodyIndex( mFrame.getBodyIndex() ) );
 		gl::draw( tex, tex->getBounds(), Rectf( getWindowCenter(), Vec2f( getWindowSize() ) ) );
 	}
 
@@ -112,9 +104,15 @@ void BasicApp::setup()
 	mFullScreen	= false;
 
 	mDevice = Kinect2::Device::create();
-	mDevice->start( Kinect2::DeviceOptions().enableInfrared().enableInfraredLongExposure() );
-			
-	mParams = params::InterfaceGl::create( "Params", Vec2i( 200, 150 ) );
+	mDevice->start( Kinect2::DeviceOptions().enableInfrared().enableBodyIndex() );
+	
+	console( ) << Kinect2::getDeviceCount() << " device(s) connected." << endl;
+	map<size_t, string> deviceMap = Kinect2::getDeviceMap();
+	for ( const auto& device : deviceMap ) {
+		console( ) << "Index: " << device.first << ", ID: " << device.second << endl;
+	}
+
+	mParams = params::InterfaceGl::create( "Params", Vec2i( 200, 100 ) );
 	mParams->addParam( "Frame rate",	&mFrameRate,				"", true );
 	mParams->addParam( "Full screen",	&mFullScreen,				"key=f" );
 	mParams->addButton( "Quit", bind(	&BasicApp::quit, this ),	"key=q" );

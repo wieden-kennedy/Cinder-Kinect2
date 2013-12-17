@@ -1,6 +1,7 @@
 /*
 * 
-* Copyright (c) 2013, Wieden+Kennedy, Stephen Schieberl
+* Copyright (c) 2013, Wieden+Kennedy
+* Stephen Schieberl, Michael Latzoni
 * All rights reserved.
 * 
 * Redistribution and use in source and binary forms, with or 
@@ -55,7 +56,28 @@
 
 namespace Kinect2 {
 
-std::string getStatusMessage( KinectStatus status );
+ci::Channel8u									channel16To8( const ci::Channel16u& channel );
+ci::Surface8u									colorizeBodyIndex( const ci::Channel8u& bodyIndexChannel );
+
+ci::Color8u										getBodyColor( size_t index );
+size_t											getDeviceCount();
+std::map<size_t, std::string>					getDeviceMap();
+std::string										getStatusMessage( KinectStatus status );
+
+ci::Vec2i										mapBodyCoordToColor( const ci::Vec3f& v, ICoordinateMapper* mapper );
+ci::Vec2i										mapBodyCoordToDepth( const ci::Vec3f& v, ICoordinateMapper* mapper );
+//ci::Surface8u									mapColorFrameToDepth( const ci::Surface8u& color, ICoordinateMapper* mapper );
+ci::Vec2i										mapDepthCoordToColor( const ci::Vec2i& v, uint16_t depth, ICoordinateMapper* mapper );
+ci::Channel16u									mapDepthFrameToColor( const ci::Channel16u& depth, ICoordinateMapper* mapper );
+
+ci::Quatf										toQuatf( const Vector4& v );
+ci::Vec2f										toVec2f( const PointF& v );
+ci::Vec2f										toVec2f( const ColorSpacePoint& v );
+ci::Vec2f										toVec2f( const DepthSpacePoint& v );
+ci::Vec3f										toVec3f( const CameraSpacePoint& v );
+ci::Vec4f										toVec4f( const Vector4& v );
+
+std::string										wcharToString( wchar_t* v );
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -185,19 +207,10 @@ public:
 	void										start( const DeviceOptions& deviceOptions = DeviceOptions() );
 	void										stop();
 
+	ICoordinateMapper*							getCoordinateMapper() const;
 	const DeviceOptions&						getDeviceOptions() const;
 	const Frame&								getFrame() const;
 	KinectStatus								getStatus() const;
-
-	// TODO move these out of device, use coord mapper from params instead
-	ci::Vec2i									mapBodyCoordToColor( const ci::Vec3f& v ) const;
-	ci::Vec2i									mapBodyCoordToDepth( const ci::Vec3f& v ) const;
-	ci::Vec2i									mapDepthCoordToColor( const ci::Vec2i& v, uint16_t depth ) const;
-
-	// TODO return Channel/Surface
-	std::vector<ci::Vec2f>						mapDepthFrameToColor( const ci::Channel16u& depth ) const;
-	//ci::Surface8u								mapDepthFrameToColor( const ci::Channel16u& depth ) const;
-	//ci::Channel16u							mapColorFrameToDepth( const ci::Surface8u& color ) const;
 protected:
 	Device();
 
@@ -213,8 +226,54 @@ protected:
 	DeviceOptions								mDeviceOptions;
 	Frame										mFrame;
 	KinectStatus								mStatus;
+public:
 
-	std::string									wcharToString( wchar_t* v );
+	//////////////////////////////////////////////////////////////////////////////////////////////
+
+	class Exception : public ci::Exception
+	{
+	public:
+		const char* what() const throw();
+	protected:
+		char									mMessage[ 2048 ];
+		friend class							Device;
+	};
+	
+	class ExcDeviceEnumerationFailed : public Exception 
+	{
+	public:
+		ExcDeviceEnumerationFailed( long hr ) throw();
+	};
+
+	class ExcDeviceInitFailed : public Exception 
+	{
+	public:
+		ExcDeviceInitFailed( long hr, const std::string& id ) throw();
+	};
+	
+	class ExcDeviceNotAvailable : public Exception 
+	{
+	public:
+		ExcDeviceNotAvailable( long hr ) throw();
+	};
+
+	class ExcDeviceOpenFailed : public Exception 
+	{
+	public:
+		ExcDeviceOpenFailed( long hr, const std::string& id ) throw();
+	};
+
+	class ExcGetCoordinateMapperFailed : public Exception 
+	{
+	public:
+		ExcGetCoordinateMapperFailed( long hr, const std::string& id ) throw();
+	};
+
+	class ExcOpenFrameReaderFailed : public Exception 
+	{
+	public:
+		ExcOpenFrameReaderFailed( long hr, const std::string& id ) throw();
+	};
 };
 
 }

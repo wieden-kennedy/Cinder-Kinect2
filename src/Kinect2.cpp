@@ -1,6 +1,7 @@
 /*
 * 
-* Copyright (c) 2013, Wieden+Kennedy, Stephen Schieberl
+* Copyright (c) 2013, Wieden+Kennedy
+* Stephen Schieberl, Michael Latzoni
 * All rights reserved.
 * 
 * Redistribution and use in source and binary forms, with or 
@@ -45,6 +46,120 @@ using namespace ci;
 using namespace ci::app;
 using namespace std;
 
+Channel8u channel16To8( const Channel16u& channel )
+{
+	Channel8u channel8;
+	if ( channel ) {
+		channel8						= Channel8u( channel.getWidth(), channel.getHeight() );
+		Channel16u::ConstIter iter16	= channel.getIter();
+		Channel8u::Iter iter8			= channel8.getIter();
+		while ( iter8.line() && iter16.line() ) {
+			while ( iter8.pixel() && iter16.pixel() ) {
+				iter8.v()				= iter16.v() >> 4;
+			}
+		}
+	}
+	return channel8;
+}
+
+Surface8u colorizeBodyIndex( const Channel8u& bodyIndexChannel )
+{
+	Surface8u surface;
+	if ( bodyIndexChannel ) {
+		surface = Surface8u( bodyIndexChannel.getWidth(), bodyIndexChannel.getHeight(), true, SurfaceChannelOrder::RGBA );
+		Channel8u::ConstIter iterChannel	= bodyIndexChannel.getIter();
+		Surface8u::Iter iterSurface			= surface.getIter();
+		while ( iterChannel.line() && iterSurface.line() ) {
+			while ( iterChannel.pixel() && iterSurface.pixel() ) {
+				size_t index				= (size_t)iterChannel.v();
+				ColorA8u color( getBodyColor( index ), 0xFF );
+				if ( index == 0 || index > BODY_COUNT ) {
+					color.a					= 0x00;
+				}
+				iterSurface.r()				= color.r;
+				iterSurface.g()				= color.g;
+				iterSurface.b()				= color.b;
+				iterSurface.a()				= color.a;
+			}
+		}
+	}
+	return surface;
+}
+
+Color8u getBodyColor( size_t index )
+{
+	switch ( index ) {
+	case 0:
+		return Color8u::black();
+	case 1:
+		return Color8u( 0xFF, 0x00, 0x00 );
+	case 2:
+		return Color8u( 0x00, 0xFF, 0x00 );
+	case 3:
+		return Color8u( 0x00, 0x00, 0xFF );
+	case 4:
+		return Color8u( 0xFF, 0xFF, 0x00 );
+	case 5:
+		return Color8u( 0x00, 0xFF, 0xFF );
+	case 6:
+		return Color8u( 0xFF, 0x00, 0xFF );
+	default:
+		return Color8u::white();
+	}
+}
+
+size_t getDeviceCount()
+{
+	size_t count								= 0;
+	IKinectSensorCollection* sensorCollection	= 0;
+	long hr = GetKinectSensorCollection( &sensorCollection );
+	if ( SUCCEEDED( hr ) && sensorCollection != 0 ) {
+		IEnumKinectSensor* sensorEnum = 0;
+		hr = sensorCollection->get_Enumerator( &sensorEnum );
+		if ( SUCCEEDED( hr ) || sensorEnum != 0 ) {
+			size_t i = 0;
+			while ( SUCCEEDED( hr ) && i < 8 ) {
+				IKinectSensor* sensor = 0;
+				hr = sensorEnum->GetNext( &sensor );
+				if ( sensor != 0 ) {
+					++count;
+				}
+				++i;
+			}
+		}
+	}
+	return count;
+}
+
+map<size_t, string> getDeviceMap()
+{
+	map<size_t, string> deviceMap;
+	IKinectSensorCollection* sensorCollection	= 0;
+	long hr = GetKinectSensorCollection( &sensorCollection );
+	if ( SUCCEEDED( hr ) && sensorCollection != 0 ) {
+		IEnumKinectSensor* sensorEnum = 0;
+		hr = sensorCollection->get_Enumerator( &sensorEnum );
+		if ( SUCCEEDED( hr ) || sensorEnum != 0 ) {
+			size_t i = 0;
+			while ( SUCCEEDED( hr ) && i < 8 ) {
+				IKinectSensor* sensor = 0;
+				hr = sensorEnum->GetNext( &sensor );
+				if ( sensor != 0 ) {
+					wchar_t wid[ 48 ];
+					if ( SUCCEEDED( sensor->get_UniqueKinectId( 48, wid ) ) ) {
+						string id = wcharToString( wid );
+						if ( !id.empty() ) {
+							deviceMap[ i ] = string( id );
+						}
+					}
+				}
+				++i;
+			}
+		}
+	}
+	return deviceMap;
+}
+
 string getStatusMessage( KinectStatus status )
 {
 	switch ( status ) {
@@ -75,24 +190,113 @@ string getStatusMessage( KinectStatus status )
 	}
 }
 
-inline Vec3f toVec3f( const CameraSpacePoint& v )
+Vec2i mapBodyCoordToColor( const Vec3f& v, ICoordinateMapper* mapper )
+{
+	CameraSpacePoint cameraSpacePoint;
+	cameraSpacePoint.X = v.x;
+	cameraSpacePoint.Y = v.y;
+	cameraSpacePoint.Z = v.z;
+
+	ColorSpacePoint colorSpacePoint;
+	long hr = mapper->MapCameraPointToColorSpace( cameraSpacePoint, &colorSpacePoint );
+	if ( SUCCEEDED( hr ) ) {
+		return Vec2i( static_cast<int32_t>( colorSpacePoint.X ), static_cast<int32_t>( colorSpacePoint.Y ) );
+	}
+	return Vec2i();
+}
+
+Vec2i mapBodyCoordToDepth( const Vec3f& v, ICoordinateMapper* mapper )
+{
+	CameraSpacePoint cameraSpacePoint;
+	cameraSpacePoint.X = v.x;
+	cameraSpacePoint.Y = v.y;
+	cameraSpacePoint.Z = v.z;
+
+	DepthSpacePoint depthSpacePoint;
+	long hr = mapper->MapCameraPointToDepthSpace( cameraSpacePoint, &depthSpacePoint );
+	if ( SUCCEEDED( hr ) ) {
+		return Vec2i( toVec2f( depthSpacePoint ) );
+	}
+	return Vec2i();
+}
+
+Vec2i mapDepthCoordToColor( const Vec2i& v, uint16_t depth, ICoordinateMapper* mapper )
+{
+	DepthSpacePoint depthSpacePoint;
+	depthSpacePoint.X = (float)v.x;
+	depthSpacePoint.Y = (float)v.y;
+
+	ColorSpacePoint colorSpacePoint;
+	long hr = mapper->MapDepthPointToColorSpace( depthSpacePoint, depth, &colorSpacePoint );
+	if ( SUCCEEDED( hr ) ) {
+		return Vec2i( toVec2f( colorSpacePoint ) );
+	}
+	return Vec2i();
+}
+
+Channel16u mapDepthFrameToColor( const Channel16u& depth, ICoordinateMapper* mapper )
+{
+	size_t numPoints = depth.getWidth() * depth.getHeight();
+	Channel16u channel( depth.getWidth(), depth.getHeight() );
+	vector<ColorSpacePoint> colorSpacePoints( numPoints );
+	long hr = mapper->MapDepthFrameToColorSpace( (UINT)numPoints, depth.getData(), numPoints, &colorSpacePoints[ 0 ] );
+	if ( SUCCEEDED( hr ) ) {
+		Channel16u::Iter iter = channel.getIter();
+		size_t i = 0;
+		while ( iter.line() ) {
+			while ( iter.pixel() ) {
+				Vec2i pos = Vec2i( toVec2f( colorSpacePoints[ i ] ) );
+				uint16_t v = 0x0000;
+				if ( pos.x >= 0 && pos.x < depth.getWidth() && pos.y >= 0 && pos.y < depth.getHeight() ) {
+					v = depth.getValue( pos );
+				}
+				iter.v() = v;
+			}
+		}
+	}
+	return channel;
+}
+
+Quatf toQuatf( const Vector4& v )
+{
+	return Quatf( v.w, v.x, v.y, v.z );
+}
+
+Vec2f toVec2f( const PointF& v )
+{
+	return Vec2f( v.X, v.Y );
+}
+
+Vec2f toVec2f( const ColorSpacePoint& v )
+{
+	return Vec2f( v.X, v.Y );
+}
+
+Vec2f toVec2f( const DepthSpacePoint& v )
+{
+	return Vec2f( v.X, v.Y );
+}
+
+Vec3f toVec3f( const CameraSpacePoint& v )
 {
 	return Vec3f( v.X, v.Y, v.Z );
 }
 
-inline Quatf toQuatf( const Vector4& v )
+Vec4f toVec4f( const Vector4& v )
 {
-	return Quatf( v.x, v.y, v.z, v.w );
+	return Vec4f( v.x, v.y, v.z, v.w );
 }
 
-inline Vec2i toVec2i( const ColorSpacePoint& v )
+string wcharToString( wchar_t* v )
 {
-	return Vec2i( static_cast<int32_t>( v.X ), static_cast<int32_t>( v.Y ) );
-}
-
-inline Vec2i toVec2i( const DepthSpacePoint& v )
-{
-	return Vec2i( static_cast<int32_t>( v.X ), static_cast<int32_t>( v.Y ) );
+	string str = "";
+	wchar_t* id = ::SysAllocString( v );
+	_bstr_t idStr( id );
+	if ( idStr.length() > 0 ) {
+		str = string( idStr );
+	}
+	::SysFreeString( id );
+	return str;
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////
@@ -336,6 +540,26 @@ Device::~Device()
 	stop();
 }
 
+ICoordinateMapper* Device::getCoordinateMapper() const
+{
+	return mCoordinateMapper;
+}
+
+const DeviceOptions& Device::getDeviceOptions() const
+{
+	return mDeviceOptions;
+}
+
+const Frame& Device::getFrame() const
+{
+	return mFrame;
+}
+
+KinectStatus Device::getStatus() const
+{
+	return mStatus;
+}
+
 void Device::start( const DeviceOptions& deviceOptions )
 {
 	long hr = S_OK;
@@ -344,16 +568,14 @@ void Device::start( const DeviceOptions& deviceOptions )
 	IKinectSensorCollection* sensorCollection = 0;
 	hr = GetKinectSensorCollection( &sensorCollection );
 	if ( FAILED( hr ) || sensorCollection == 0 ) {
-		// TODO throw exception
-		return;
+		throw ExcDeviceNotAvailable( hr );
 	}
 
 	//sensorCollection->SubscribeCollectionChanged( &Device::onSensorCollectionChanged );
 	IEnumKinectSensor* sensorEnum = 0;
 	hr = sensorCollection->get_Enumerator( &sensorEnum );
 	if ( FAILED( hr ) || sensorEnum == 0 ) {
-		// TODO throw exception
-		return;
+		throw ExcDeviceEnumerationFailed( hr );
 	}
 
 	hr			= S_OK;
@@ -367,7 +589,6 @@ void Device::start( const DeviceOptions& deviceOptions )
 			if ( SUCCEEDED( mSensor->get_UniqueKinectId( 48, wid ) ) ) {
 				id = wcharToString( wid );
 			}
-
 			if ( mDeviceOptions.getDeviceId().empty() ) {
 				if ( mDeviceOptions.getDeviceIndex() == i ) {
 					mDeviceOptions.setDeviceId( id );
@@ -383,40 +604,48 @@ void Device::start( const DeviceOptions& deviceOptions )
 		++i;
 	}
 
-	if ( mSensor != 0 ) {
-		hr = mSensor->get_CoordinateMapper( &mCoordinateMapper );
+	if ( mSensor == 0 ) {
+		throw ExcDeviceInitFailed( hr, mDeviceOptions.getDeviceId() );
+	} else {
 		hr = mSensor->Open();
 		if ( SUCCEEDED( hr ) ) {
-			long flags = 0L;
-			if ( mDeviceOptions.isAudioEnabled() ) {
-				flags |= FrameSourceTypes::FrameSourceTypes_Audio;
-			}
-			if ( mDeviceOptions.isBodyEnabled() ) {
-				flags |= FrameSourceTypes::FrameSourceTypes_Body;
-			}
-			if ( mDeviceOptions.isBodyIndexEnabled() ) {
-				flags |= FrameSourceTypes::FrameSourceTypes_BodyIndex;
-			}
-			if ( mDeviceOptions.isColorEnabled() ) {
-				flags |= FrameSourceTypes::FrameSourceTypes_Color;
-			}
-			if ( mDeviceOptions.isDepthEnabled() ) {
-				flags |= FrameSourceTypes::FrameSourceTypes_Depth;
-			}
-			if ( mDeviceOptions.isInfraredEnabled() ) {
-				flags |= FrameSourceTypes::FrameSourceTypes_Infrared;
-			}
-			if ( mDeviceOptions.isInfraredLongExposureEnabled() ) {
-				flags |= FrameSourceTypes::FrameSourceTypes_LongExposureInfrared;
-			}
-
-			hr = mSensor->OpenMultiSourceFrameReader( flags, &mFrameReader );
-			if ( FAILED( hr ) ) {
-				if ( mFrameReader != 0 ) {
-					mFrameReader->Release();
-					mFrameReader = 0;
+			hr = mSensor->get_CoordinateMapper( &mCoordinateMapper );
+			if ( SUCCEEDED( hr ) ) {
+				long flags = 0L;
+				if ( mDeviceOptions.isAudioEnabled() ) {
+					flags |= FrameSourceTypes::FrameSourceTypes_Audio;
 				}
+				if ( mDeviceOptions.isBodyEnabled() ) {
+					flags |= FrameSourceTypes::FrameSourceTypes_Body;
+				}
+				if ( mDeviceOptions.isBodyIndexEnabled() ) {
+					flags |= FrameSourceTypes::FrameSourceTypes_BodyIndex;
+				}
+				if ( mDeviceOptions.isColorEnabled() ) {
+					flags |= FrameSourceTypes::FrameSourceTypes_Color;
+				}
+				if ( mDeviceOptions.isDepthEnabled() ) {
+					flags |= FrameSourceTypes::FrameSourceTypes_Depth;
+				}
+				if ( mDeviceOptions.isInfraredEnabled() ) {
+					flags |= FrameSourceTypes::FrameSourceTypes_Infrared;
+				}
+				if ( mDeviceOptions.isInfraredLongExposureEnabled() ) {
+					flags |= FrameSourceTypes::FrameSourceTypes_LongExposureInfrared;
+				}
+				hr = mSensor->OpenMultiSourceFrameReader( flags, &mFrameReader );
+				if ( FAILED( hr ) ) {
+					if ( mFrameReader != 0 ) {
+						mFrameReader->Release();
+						mFrameReader = 0;
+					}
+					throw ExcOpenFrameReaderFailed( hr, mDeviceOptions.getDeviceId() );
+				}
+			} else {
+				throw ExcDeviceOpenFailed( hr, mDeviceOptions.getDeviceId() );
 			}
+		} else {
+			throw ExcGetCoordinateMapperFailed( hr, mDeviceOptions.getDeviceId() );
 		}
 	}
 }
@@ -440,85 +669,6 @@ void Device::stop()
 	}
 }
 
-const DeviceOptions& Device::getDeviceOptions() const
-{
-	return mDeviceOptions;
-}
-
-const Frame& Device::getFrame() const
-{
-	return mFrame;
-}
-
-KinectStatus Device::getStatus() const
-{
-	return mStatus;
-}
-
-Vec2i Device::mapBodyCoordToColor( const Vec3f& v ) const
-{
-	CameraSpacePoint cameraSpacePoint;
-	cameraSpacePoint.X = v.x;
-	cameraSpacePoint.Y = v.y;
-	cameraSpacePoint.Z = v.z;
-
-	ColorSpacePoint colorSpacePoint;
-	long hr = mCoordinateMapper->MapCameraPointToColorSpace( cameraSpacePoint, &colorSpacePoint );
-	if ( SUCCEEDED( hr ) ) {
-		return Vec2i( static_cast<int32_t>( colorSpacePoint.X ), static_cast<int32_t>( colorSpacePoint.Y ) );
-	}
-	return Vec2i();
-}
-
-Vec2i Device::mapBodyCoordToDepth( const Vec3f& v ) const
-{
-	CameraSpacePoint cameraSpacePoint;
-	cameraSpacePoint.X = v.x;
-	cameraSpacePoint.Y = v.y;
-	cameraSpacePoint.Z = v.z;
-
-	DepthSpacePoint depthSpacePoint;
-	long hr = mCoordinateMapper->MapCameraPointToDepthSpace( cameraSpacePoint, &depthSpacePoint );
-	if ( SUCCEEDED( hr ) ) {
-		return Vec2i( static_cast<int32_t>( depthSpacePoint.X ), static_cast<int32_t>( depthSpacePoint.Y ) );
-	}
-	return Vec2i();
-}
-
-Vec2i Device::mapDepthCoordToColor( const Vec2i& v, uint16_t depth ) const
-{
-	DepthSpacePoint depthSpacePoint;
-	depthSpacePoint.X = (float)v.x;
-	depthSpacePoint.Y = (float)v.y;
-
-	ColorSpacePoint colorSpacePoint;
-	long hr = mCoordinateMapper->MapDepthPointToColorSpace( depthSpacePoint, depth, &colorSpacePoint );
-	if ( SUCCEEDED( hr ) ) {
-		return toVec2i( colorSpacePoint );
-	}
-	return Vec2i();
-}
-
-vector<Vec2f> Device::mapDepthFrameToColor( const Channel16u& depth ) const
-{
-	uint32_t numDepthPoints = depth.getWidth() * depth.getHeight();
-	uint32_t numColorPoints = numDepthPoints;
-	vector<ColorSpacePoint> colorSpacePoints( numDepthPoints );
-	
-	HRESULT hr = mCoordinateMapper->MapDepthFrameToColorSpace( numDepthPoints, depth.getData(), numColorPoints, &colorSpacePoints[ 0 ] );
-	if ( FAILED( hr ) ) {
-		return vector<Vec2f>();
-	}
-
-	vector<Vec2f> colorFramePoints( numDepthPoints );
-	transform( colorSpacePoints.begin(), colorSpacePoints.end(), colorFramePoints.begin(), []( const ColorSpacePoint& c ) -> Vec2f
-	{
-		return Vec2f( c.X, c.Y );
-	} );
-
-	return colorFramePoints;
-}
-
 void Device::update()
 {
 	if ( mSensor != 0 ) {
@@ -539,10 +689,9 @@ void Device::update()
 	ILongExposureInfraredFrame* infraredLongExposureFrame	= 0;
 	
 	HRESULT hr = mFrameReader->AcquireLatestFrame( &frame );
-
-	// TODO audio
-	if ( SUCCEEDED( hr ) ) {
-		//console() << "SUCCEEDED " << getElapsedFrames() << endl;
+	
+	if ( SUCCEEDED( hr ) && mDeviceOptions.isAudioEnabled() ) {
+		// TODO audio	
 	}
 
 	if ( SUCCEEDED( hr ) && mDeviceOptions.isBodyEnabled() ) {
@@ -900,16 +1049,41 @@ void Device::update()
 	}
 }
 
-string Device::wcharToString( wchar_t* v )
+//////////////////////////////////////////////////////////////////////////////////////////////
+
+const char* Device::Exception::what() const throw()
 {
-	string str = "";
-	wchar_t* id = ::SysAllocString( v );
-	_bstr_t idStr( id );
-	if ( idStr.length() > 0 ) {
-		str = string( idStr );
-	}
-	::SysFreeString( id );
-	return str;
+	return mMessage;
+}
+
+Device::ExcDeviceEnumerationFailed::ExcDeviceEnumerationFailed( long hr ) throw()
+{
+	sprintf( mMessage, "Unable to enumerate devices. Error: %i", hr );
+}
+
+Device::ExcDeviceInitFailed::ExcDeviceInitFailed( long hr, const string& id ) throw()
+{
+	sprintf( mMessage, "Device initialization failed. Device ID: %s. Error: %i", id, hr );
+}
+
+Device::ExcDeviceNotAvailable::ExcDeviceNotAvailable( long hr ) throw()
+{
+	sprintf( mMessage, "No devices are available. Error: %i", hr );
+}
+
+Device::ExcDeviceOpenFailed::ExcDeviceOpenFailed( long hr, const string& id ) throw()
+{
+	sprintf( mMessage, "Unable to open device. Device ID: %s. Error: %i", id, hr );
+}
+
+Device::ExcGetCoordinateMapperFailed::ExcGetCoordinateMapperFailed( long hr, const string& id ) throw()
+{
+	sprintf( mMessage, "Unable to get device coordinate mapper. Device ID: %s. Error: %i", id, hr );
+}
+
+Device::ExcOpenFrameReaderFailed::ExcOpenFrameReaderFailed( long hr, const string& id ) throw()
+{
+	sprintf( mMessage, "Unable to open frame reader. Device ID: %s. Error: %i", id, hr );
 }
 
 }

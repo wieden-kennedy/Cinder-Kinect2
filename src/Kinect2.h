@@ -59,7 +59,7 @@ namespace Kinect2 {
 ci::Channel8u									channel16To8( const ci::Channel16u& channel );
 ci::Surface8u									colorizeBodyIndex( const ci::Channel8u& bodyIndexChannel );
 
-ci::Color8u										getBodyColor( size_t index );
+ci::Color8u										getBodyColor( uint64_t index );
 size_t											getDeviceCount();
 std::map<size_t, std::string>					getDeviceMap();
 std::string										getStatusMessage( KinectStatus status );
@@ -148,6 +148,8 @@ public:
 	};
 
 	//////////////////////////////////////////////////////////////////////////////////////////////
+
+	float										calcConfidence() const;
 
 	uint64_t									getId() const;
 	uint8_t										getIndex() const;

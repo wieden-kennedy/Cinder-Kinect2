@@ -86,7 +86,7 @@ Surface8u colorizeBodyIndex( const Channel8u& bodyIndexChannel )
 	return surface;
 }
 
-Color8u getBodyColor( size_t index )
+Color8u getBodyColor( uint64_t index )
 {
 	switch ( index ) {
 	case 0:
@@ -444,6 +444,18 @@ Body::Body()
 Body::Body( uint64_t id, uint8_t index, const map<JointType, Body::Joint>& jointMap )
 : mId( id ), mIndex( index ), mJointMap( jointMap ), mTracked( true )
 {
+}
+
+float Body::calcConfidence() const
+{
+	float c = 0.0f;
+	for ( map<JointType, Body::Joint>::const_iterator iter = mJointMap.begin(); iter != mJointMap.end(); ++iter ) {
+		if ( iter->second.getTrackingState() == TrackingState::TrackingState_Tracked ) {
+			c += 1.0f;
+		}
+	}
+	c /= (float)JointType::JointType_Count;
+	return c;
 }
 
 uint64_t Body::getId() const 

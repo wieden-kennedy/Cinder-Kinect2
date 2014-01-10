@@ -446,15 +446,51 @@ Body::Body( uint64_t id, uint8_t index, const map<JointType, Body::Joint>& joint
 {
 }
 
-float Body::calcConfidence() const
+float Body::calcConfidence( bool weighted ) const
 {
 	float c = 0.0f;
-	for ( map<JointType, Body::Joint>::const_iterator iter = mJointMap.begin(); iter != mJointMap.end(); ++iter ) {
-		if ( iter->second.getTrackingState() == TrackingState::TrackingState_Tracked ) {
-			c += 1.0f;
+	if ( weighted ) {
+		static map<JointType, float> weights;
+		if ( weights.empty() ) {
+			weights[ JointType::JointType_SpineBase ]		= 0.042553191f;
+			weights[ JointType::JointType_SpineMid ]		= 0.042553191f;
+			weights[ JointType::JointType_Neck ]			= 0.021276596f;
+			weights[ JointType::JointType_Head ]			= 0.042553191f;
+			weights[ JointType::JointType_ShoulderLeft ]	= 0.021276596f;
+			weights[ JointType::JointType_ElbowLeft ]		= 0.010638298f;
+			weights[ JointType::JointType_WristLeft ]		= 0.005319149f;
+			weights[ JointType::JointType_HandLeft ]		= 0.042553191f;
+			weights[ JointType::JointType_ShoulderRight ]	= 0.021276596f;
+			weights[ JointType::JointType_ElbowRight ]		= 0.010638298f;
+			weights[ JointType::JointType_WristRight ]		= 0.005319149f;
+			weights[ JointType::JointType_HandRight ]		= 0.042553191f;
+			weights[ JointType::JointType_HipLeft ]			= 0.021276596f;
+			weights[ JointType::JointType_KneeLeft ]		= 0.010638298f;
+			weights[ JointType::JointType_AnkleLeft ]		= 0.005319149f;
+			weights[ JointType::JointType_FootLeft ]		= 0.042553191f;
+			weights[ JointType::JointType_HipRight ]		= 0.021276596f;
+			weights[ JointType::JointType_KneeRight ]		= 0.010638298f;
+			weights[ JointType::JointType_AnkleRight ]		= 0.005319149f;
+			weights[ JointType::JointType_FootRight ]		= 0.042553191f;
+			weights[ JointType::JointType_SpineShoulder ]	= 0.002659574f;
+			weights[ JointType::JointType_HandTipLeft ]		= 0.002659574f;
+			weights[ JointType::JointType_ThumbLeft ]		= 0.002659574f;
+			weights[ JointType::JointType_HandTipRight ]	= 0.002659574f;
+			weights[ JointType::JointType_ThumbRight ]		= 0.521276596f;
 		}
+		for ( map<JointType, Body::Joint>::const_iterator iter = mJointMap.begin(); iter != mJointMap.end(); ++iter ) {
+			if ( iter->second.getTrackingState() == TrackingState::TrackingState_Tracked ) {
+				c += weights[ iter->first ];
+			}
+		}
+	} else {
+		for ( map<JointType, Body::Joint>::const_iterator iter = mJointMap.begin(); iter != mJointMap.end(); ++iter ) {
+			if ( iter->second.getTrackingState() == TrackingState::TrackingState_Tracked ) {
+				c += 1.0f;
+			}
+		}
+		c /= (float)JointType::JointType_Count;
 	}
-	c /= (float)JointType::JointType_Count;
 	return c;
 }
 

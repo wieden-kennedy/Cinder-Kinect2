@@ -149,7 +149,7 @@ public:
 
 	//////////////////////////////////////////////////////////////////////////////////////////////
 
-	float										calcConfidence() const;
+	float										calcConfidence( bool weighted = false ) const;
 
 	uint64_t									getId() const;
 	uint8_t										getIndex() const;
